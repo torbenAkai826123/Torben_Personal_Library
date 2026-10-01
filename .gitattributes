@@ -1,0 +1,112 @@
+# Git 屬性：文字正規化 + Unity 常見二進位，減少跨 OS／合併誤判。
+# 工作區以 CRLF 為準（與本專案多數原始碼一致）。
+
+# 預設：偵測為文字則正規化；checkout 用 CRLF
+* text=auto eol=crlf
+
+# --- 原始碼／文件 ---
+*.cs text eol=crlf
+*.md text eol=crlf
+*.txt text eol=crlf
+*.json text eol=crlf
+*.xml text eol=crlf
+*.yml text eol=crlf
+*.yaml text eol=crlf
+*.asmdef text eol=crlf
+*.asmref text eol=crlf
+*.inputactions text eol=crlf
+*.uxml text eol=crlf
+*.uss text eol=crlf
+*.shader text eol=crlf
+*.cginc text eol=crlf
+*.hlsl text eol=crlf
+*.compute text eol=crlf
+*.editorconfig text eol=crlf
+*.gitattributes text eol=crlf
+*.gitignore text eol=crlf
+
+# --- Unity YAML 資產（當文字；避免被當 binary）---
+*.meta text eol=crlf
+*.unity text eol=crlf
+*.prefab text eol=crlf
+*.asset text eol=crlf
+*.anim text eol=crlf
+*.controller text eol=crlf
+*.overrideController text eol=crlf
+*.mat text eol=crlf
+*.physicMaterial text eol=crlf
+*.physicsMaterial2D text eol=crlf
+*.fontsettings text eol=crlf
+*.guiskin text eol=crlf
+*.mask text eol=crlf
+*.flare text eol=crlf
+*.renderTexture text eol=crlf
+*.spriteatlas text eol=crlf
+*.spriteatlasv2 text eol=crlf
+*.terrainlayer text eol=crlf
+*.mixer text eol=crlf
+*.signal text eol=crlf
+*.playable text eol=crlf
+*.giparams text eol=crlf
+*.brush text eol=crlf
+*.wlt text eol=crlf
+*.scenetemplate text eol=crlf
+
+# --- 腳本：跨 OS 保持 LF；Windows 批次用 CRLF ---
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# --- 二進位：禁止 Git 做換行轉換 ---
+# 影像
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bmp binary
+*.tga binary
+*.psd binary
+*.psb binary
+*.tif binary
+*.tiff binary
+*.exr binary
+*.hdr binary
+*.ico binary
+# 模型／網格
+*.fbx binary
+*.obj binary
+*.dae binary
+*.3ds binary
+*.blend binary
+# 影音
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.aif binary
+*.aiff binary
+*.mp4 binary
+*.mov binary
+*.webm binary
+# 字型
+*.ttf filter=lfs diff=lfs merge=lfs -text
+*.otf filter=lfs diff=lfs merge=lfs -text
+*.woff binary
+*.woff2 binary
+# 原生／套件
+*.dll binary
+*.so binary
+*.dylib binary
+*.a binary
+*.lib binary
+*.exe binary
+*.pdb binary
+*.mdb binary
+*.jar binary
+*.aar binary
+*.unitypackage binary
+*.zip binary
+*.7z binary
+*.rar binary
+*.gz binary
+*.bytes binary

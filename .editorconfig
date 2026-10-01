@@ -1,0 +1,39 @@
+# EditorConfig：跨編輯器／AI 寫檔時的文字慣例。
+# https://editorconfig.org/
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Markdown：保留行尾兩空白（硬換行）；其餘與全域相同。
+[*.md]
+trim_trailing_whitespace = false
+
+# C#／Unity 腳本
+[*.cs]
+indent_size = 4
+
+# 設定／資料（JSON、YAML、asmdef 等）
+[*.{json,yml,yaml,asmdef,asmref,inputactions}]
+indent_size = 2
+
+# Shader／HLSL
+[*.{shader,cginc,hlsl,compute}]
+indent_size = 4
+
+# UI Toolkit
+[*.{uxml,uss}]
+indent_size = 2
+
+# Shell（若有跨 OS 腳本，保持 LF）
+[*.sh]
+end_of_line = lf
+
+# Windows 批次
+[*.{bat,cmd,ps1}]
+end_of_line = crlf

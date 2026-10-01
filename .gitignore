@@ -108,3 +108,10 @@ InitTestScene*.unity*
 # Cursor / VS Code local state (keep shared settings if you add them later)
 .cursor/
 *.code-workspace
+.vscode/
+
+# Unity Version Control (Plastic) local workspace data; not used here
+/plastic4/
+
+# Profiler captures can get excessive in size
+/[Pp]rofilerCaptures/
