@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 與 Unity 共用原始碼: 編譯 Assets 內的 Core, 不另存副本 -->
+  <PropertyGroup>
+    <!-- 對齊 Unity 6 的 API 相容層級 (.NET Standard 2.1) 與 C# 版本 -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Torben.Core</AssemblyName>
+    <RootNamespace />
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Assets/[TorbenJuniorUtility]/Scripts/Core/**/*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1837,7 +1837,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b89f246402528114490c8aa05ddda645, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: TorbenJuniorUtility.Calculator::TorbenJuniorUtility.Calculator.CalculatorView
+  m_EditorClassIdentifier: TorbenJuniorUtility.Calculator::Torben.Calculator.CalculatorView
   displayText: {fileID: 2143907462}
   digitButtons:
   - {fileID: 1248953115}

@@ -118,3 +118,9 @@ InitTestScene*.unity*
 
 # 本機臨時文件 (不上傳)
 /docs/ignore/
+
+# 純 C# 測試環境 (dotnet test): 保留專案檔, 忽略建置輸出
+!/dotnet/**/*.csproj
+!/dotnet/*.sln
+/dotnet/**/bin/
+/dotnet/**/obj/

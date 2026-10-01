@@ -1,6 +1,7 @@
 {
   "name": "TorbenJuniorUtility.Calculator",
   "references": [
+    "Torben.Core",
     "UnityEngine.UI",
     "Unity.TextMeshPro"
   ]
