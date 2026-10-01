@@ -18,9 +18,9 @@
 
 | 項目 | 狀態 | 確認方式 |
 |---|---|---|
-| CLI | `1.0.0-beta.11`，以 MSIX 安裝 (`UnityTechnologies.UnityCLI`)，PATH 優先找到 `%LOCALAPPDATA%\Microsoft\WindowsApps\unity.exe` | `unity version --format json`、`unity diagnose update` |
-| CLI 健康檢查 | 通過；唯一警告為 PATH 上有兩份 (另一份是安裝腳本版 `%LOCALAPPDATA%\Unity\bin\unity.exe`，版本相同) | `unity doctor --format json` |
-| 登入 | **不穩定**：同日先顯示已登入，數分鐘後變成未登入 (退出碼 3)。需要時由使用者執行 `unity auth login` | `unity auth status` |
+| CLI | `1.0.0-beta.11`，以 MSIX 安裝 (`UnityTechnologies.UnityCLI`)，位置 `%LOCALAPPDATA%\Microsoft\WindowsApps\unity.exe` | `unity version --format json`、`unity diagnose update` |
+| CLI 健康檢查 | 全部通過 (原有的安裝腳本版重複副本已移除) | `unity doctor --format json` |
+| 登入 | 已登入，憑證存在 Windows 認證管理員 (`credentialSource: keyring`)。若回報未登入 (退出碼 3)，由使用者執行 `unity auth login` | `unity auth status --format json` |
 | Editor | `6000.5.5f1` 已安裝，與專案版本相符 | `unity editors -i` |
 | Pipeline 套件 | `0.8.0-exp.1` 已在 `Packages/manifest.json` | `unity pipeline list` |
 | EditMode 測試 | `unity test` 成功，8/8 通過，退出碼 0 | 見下方「Editor 關閉時」 |
@@ -131,7 +131,7 @@ unity build . --list-targets
 
 ## 已知注意事項
 
-- **batch mode 可能改到 `ProjectSettings/`**：2026-10-01 執行 `unity test` 後，`com.unity.ai.inference` 套件的 `AnalyticsDefineManager` 依 Editor 分析設定，從 `ProjectSettings/ProjectSettings.asset` 的 `scriptingDefineSymbols` 移除了 `SENTIS_ANALYTICS_ENABLED`。執行後務必用 `git status` 比對；這類變更不是任務成果，應回報使用者決定保留或還原。- CLI 每次執行會送出一筆匿名使用量資料；設定 `UNITY_NO_CRASH_REPORT` 只會關閉當機回報。
+- **batch mode 可能改到 `ProjectSettings/`**：2026-10-01 執行 `unity test` 後，當時安裝的 `com.unity.ai.inference` 套件 (之後已移除) 自動從 `ProjectSettings/ProjectSettings.asset` 的 `scriptingDefineSymbols` 移除了 `SENTIS_ANALYTICS_ENABLED`。執行後務必用 `git status` 比對；這類變更不是任務成果，應回報使用者決定保留或還原。- CLI 每次執行會送出一筆匿名使用量資料；設定 `UNITY_NO_CRASH_REPORT` 只會關閉當機回報。
 - `unity skill show` 會印出 CLI 內建、給 AI 代理用的完整操作指南，版本更新後可用它核對本手冊。
 
 ## 參考
