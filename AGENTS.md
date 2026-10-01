@@ -35,8 +35,8 @@
 - 能從現有資料推得的次要細節可採合理假設並說明；缺少資訊會實質改變結論或行動方向時，先釐清。完成後報告結果、驗證證據、實際改動與已知限制。
 
 ## Unity Editor 批次操作規則
-- 本節的 CLI 指 `Unity.exe` 的命令列參數，不是 Unity 官方另行提供的 `unity` CLI。若任務指定後者，僅用已知設定確認其安裝、登入與 Unity Pipeline 連線；缺少其中任何一項就回報，不自行搜尋或安裝。
-- 執行前讀 [`docs/unity-cli.md`](docs/unity-cli.md)；依 `ProjectSettings/ProjectVersion.txt` 核對 Editor 版本，確認 `Unity.exe` 實際路徑、專案根路徑、Git 原有變更及同專案是否已在 Editor 開啟。不可讓同一專案同時在 Editor 與 batch mode 執行；不要擅自關閉使用者的 Editor。
+- 用語：本專案的「Unity CLI」專指 Unity 官方的 `unity` 命令列工具，操作方式見 [`docs/unity-cli-pipeline.md`](docs/unity-cli-pipeline.md)；用它時僅以已知設定確認其安裝、登入與 Unity Pipeline 連線，缺少其中任何一項就回報，不自行搜尋或安裝。本節其餘規則針對以 `Unity.exe` 命令列參數 (`-batchmode` 等) 直接啟動 Editor 的批次操作；請求寫「batch mode」或「Unity.exe」時用此方式。
+- 執行前讀 [`docs/unity-batchmode.md`](docs/unity-batchmode.md)；依 `ProjectSettings/ProjectVersion.txt` 核對 Editor 版本，確認 `Unity.exe` 實際路徑、專案根路徑、Git 原有變更及同專案是否已在 Editor 開啟。不可讓同一專案同時在 Editor 與 batch mode 執行；不要擅自關閉使用者的 Editor。
 - 命令列操作仍受本檔的目標與檔案範圍限制。已授權範圍內的路徑、編譯或測試阻礙可自行排除並回報；需要改變目標、關閉使用中的 Editor、修改禁止範圍或做不可逆操作時才詢問。
 - 以 `-projectPath` 指向倉庫根目錄；記錄退出碼、Editor 日誌及測試結果。執行前後比較檔案差異，區分原有變更與本次變更。Unity 產生的 `Library/` 等暫存內容不得手動修改或提交；對意外變更不可逕自覆蓋、重置或當成本次成果。
 - 授權失敗時依手冊保留日誌並判斷是否有可排除的環境原因；只在條件確實改變且取得必要執行權限時，用同一已設定工具重試一次。產物已寫出不代表成功：退出碼非零、程序崩潰或測試結果缺失時，該次執行視為失敗；產物須另行驗證，未驗證前不得宣稱完成。

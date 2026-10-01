@@ -1,6 +1,6 @@
 # Unity Editor 批次操作手冊
 
-本手冊針對 Unity Editor 的 `Unity.exe` 命令列介面，不是 Unity 官方獨立的 `unity` CLI。專案版本以 `ProjectSettings/ProjectVersion.txt` 為準，目前是 `6000.5.5f1`。以下命令在 PowerShell 中執行；`Unity.exe` 的安裝位置因電腦而異，不把範例路徑當成已確認的本機路徑。若要用獨立的 Unity CLI 控制 Editor，需另依 [Unity Pipeline 官方指引](https://docs.unity.com/en-us/unity-cli/unity-pipeline/unity-pipeline-package)設定。
+本手冊針對 Unity Editor 的 `Unity.exe` 命令列介面，不是 Unity 官方獨立的 `unity` CLI。專案版本以 `ProjectSettings/ProjectVersion.txt` 為準，目前是 `6000.5.5f1`。以下命令在 PowerShell 中執行；`Unity.exe` 的安裝位置因電腦而異，不把範例路徑當成已確認的本機路徑。若要用獨立的 Unity CLI 控制 Editor，見 [`unity-cli-pipeline.md`](unity-cli-pipeline.md)。
 
 ## 執行前
 
