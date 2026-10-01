@@ -1,30 +1,33 @@
 using UnityEngine;
-[System.Serializable]
-public class Hello : MonoBehaviour
+namespace Torben.Tests
 {
-
-    [SerializeField]
-    int number = 0;
-
-    int _number = 0;
-
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    [System.Serializable]
+    public class Hello : MonoBehaviour
     {
-        print("Hello World! " + number); 
 
+        [SerializeField]
+        int number = 0;
 
-    }
+        int _number = 0;
 
-    // Update is called once per frame
-    void Update()
-    {
-        if (number != _number)
+        // Start is called once before the first execution of Update after the MonoBehaviour is created
+        void Start()
         {
             print("Hello World! " + number);
-            _number = number;
+
+
+        }
+
+        // Update is called once per frame
+        void Update()
+        {
+            if (number != _number)
+            {
+                print("Hello World! " + number);
+                _number = number;
+            }
+
         }
 
     }
-
 }

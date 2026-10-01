@@ -1,9 +1,9 @@
 {
-    "name": "TorbenJuniorUtility.Samples.Editor",
+    "name": "Torben.Samples.Editor",
     "rootNamespace": "",
     "references": [
-        "TorbenJuniorUtility.Samples",
-        "TorbenJuniorUtility.Samples.Runtime",
+        "Torben.Samples",
+        "Torben.Samples.Runtime",
         "UnityEngine.UI",
         "Unity.TextMeshPro",
         "Unity.InputSystem"

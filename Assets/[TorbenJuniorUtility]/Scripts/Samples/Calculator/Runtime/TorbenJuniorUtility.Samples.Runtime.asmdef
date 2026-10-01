@@ -1,8 +1,0 @@
-{
-  "name": "TorbenJuniorUtility.Samples.Runtime",
-  "references": [
-    "TorbenJuniorUtility.Samples",
-    "UnityEngine.UI",
-    "Unity.TextMeshPro"
-  ]
-}

@@ -13,8 +13,11 @@
 
 | 路徑 | 說明 |
 |---|---|
-| `Scripts/Calculator/` | 計算機工具 (`CalculatorModel` / `CalculatorView`) |
-| `Scripts/Tests/Editor/` | 計算機的 EditMode 測試 |
+| `Scripts/Core/` | 純 C# 函式庫, namespace 根為 `Torben` |
+| `Scripts/Runtime/`、`Scripts/Editor/` | 需要 Unity API 的執行期與 Editor 程式 |
+| `Scripts/Samples/Calculator/` | 計算機範例, namespace 為 `Torben.Calculator`, 組件為 `Torben.Samples` 系列 |
+| `Scripts/Samples/Calculator/Tests/`、`Scripts/Tests/PlayMode/` | 計算機的 EditMode 與 PlayMode 測試 |
+| `dotnet/` | 共用 Assets 原始碼的 .NET 建置與測試設定, 見 [測試手冊](docs/dotnet-test.md) |
 | `ExampleScene/` | 範例場景 |
 | `TextAsset/` | CJK 字型與 TextMesh Pro SDF 資源 |
 | `NamingRule.md` | C# 命名規則 |

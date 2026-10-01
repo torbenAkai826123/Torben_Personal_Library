@@ -1,0 +1,8 @@
+{
+  "name": "Torben.Samples.Runtime",
+  "references": [
+    "Torben.Samples",
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
+  ]
+}

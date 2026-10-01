@@ -12,11 +12,10 @@
 
 ## Namespace
 
-Choose the namespace root by scope:
+All repository-owned C# code uses `Torben` as the namespace root, including reusable libraries, repository-specific features, samples, Editor tools, and tests:
 
 ```text
-Torben[.ReusableTool]
-TorbenJuniorUtility[.ProjectFeature]
+Torben[.<Feature>]
 ```
 
 Examples:
@@ -24,15 +23,17 @@ Examples:
 ```text
 Torben.StateMachine
 Torben.Pool
-TorbenJuniorUtility.Calculator
-TorbenJuniorUtility.Tests
+Torben.Calculator
+Torben.Calculator.Editor
+Torben.Calculator.Tests
 ```
 
 Guidelines:
 
-- Features specific to this repository use `TorbenJuniorUtility` as their root.
-- Tools intended for reuse across projects use `Torben` or `Torben.<ToolName>`.
-- Choose by intended ownership, not the folder where the source file happens to live.
+- Use `Torben` as the single root; choose the suffix by domain meaning, not by whether the code is reusable or repository-specific.
+- `TorbenJuniorUtility` is a legacy project/resource-path name, not an allowed namespace root. Existing uses do not establish a second naming convention.
+- Project names and resource paths such as `Assets/[TorbenJuniorUtility]/` and `TorbenJunior.sln` may remain unchanged; they do not determine namespace names.
+- Assembly names express compilation boundaries; namespaces express features. For example, `CalculatorModel` in `Torben.Samples` and `CalculatorView` in `Torben.Samples.Runtime` both use `Torben.Calculator`.
 - Do not add unnecessary category layers such as `Core`, `Common`, `Utility`, or `Framework` unless they represent a real project boundary.
 - Source-code folders do not need to match namespaces.
 - Do not split a small public API into multiple namespaces only because files are stored in different folders.
@@ -372,7 +373,7 @@ unless that level of specificity is genuinely required.
 
 ## Existing Code
 
-Older projects may contain multiple historical naming systems.
+Older code may contain historical names that do not follow this rule. Those names are migration debt, not exceptions for new code.
 
 When editing existing code:
 
@@ -381,6 +382,8 @@ When editing existing code:
 - new APIs and new standalone tools should follow the conventions above;
 - when introducing a new subsystem, keep its naming internally consistent even if surrounding legacy code differs.
 
+The single `Torben` root takes precedence over legacy namespace and assembly names when choosing names for new code. Retaining an existing name outside the authorized scope does not permit copying that name into new code. When a task explicitly includes namespace or assembly migration, update legacy names and their references within that scope together; preserve resource GUIDs and verify affected Unity references and tests.
+
 ---
 
 ## 組件名稱
@@ -388,13 +391,15 @@ When editing existing code:
 | 用途 | 組件名稱 | namespace |
 | -- | -- | -- |
 | 可重用函式庫 | Torben.Core、Torben.Runtime、Torben.Editor、Torben.Tests.EditMode、Torben.Tests.PlayMode | Torben.<功能> |
-| 本專案專屬（範例、驗證用） | TorbenJuniorUtility.Samples (noEngineReferences)、TorbenJuniorUtility.Samples.Runtime、TorbenJuniorUtility.Samples.Editor、TorbenJuniorUtility.Samples.Tests | TorbenJuniorUtility.<功能> |
+| 範例、驗證用 | Torben.Samples (noEngineReferences)、Torben.Samples.Runtime、Torben.Samples.Editor、Torben.Samples.Tests | Torben.<功能>，例如 Torben.Calculator、Torben.Calculator.Editor、Torben.Calculator.Tests |
+
+本倉庫自有組件統一使用 `Torben` 根, 不因範例或專案專屬用途改用其他命名根。Unity 的 asmdef 名稱與引用、.NET 的 AssemblyName 與專案引用須保持一致; 組件分層不要求 namespace 同步分層。此處為目標命名規則, 既有程式碼是否已完成遷移須另行驗證。
 
 ---
 
 ## Decision Rule
 
-When uncertain about a name, prioritize in this order:
+First satisfy the required `Torben` namespace and assembly root. Within that constraint, prioritize in this order:
 
 1. Domain meaning
 2. Existing public API consistency
