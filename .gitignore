@@ -115,3 +115,6 @@ InitTestScene*.unity*
 
 # Profiler captures can get excessive in size
 /[Pp]rofilerCaptures/
+
+# 本機臨時文件 (不上傳)
+/docs/ignore/
