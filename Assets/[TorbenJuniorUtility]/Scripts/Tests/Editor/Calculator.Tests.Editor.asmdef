@@ -1,0 +1,14 @@
+{
+  "name": "TorbenJuniorUtility.Calculator.Tests.Editor",
+  "references": [
+    "TorbenJuniorUtility.Calculator",
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
+}
