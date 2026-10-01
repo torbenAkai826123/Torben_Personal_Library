@@ -2,7 +2,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Torben.Calculator
+namespace TorbenJuniorUtility.Calculator
 {
     public sealed class CalculatorView : MonoBehaviour
     {

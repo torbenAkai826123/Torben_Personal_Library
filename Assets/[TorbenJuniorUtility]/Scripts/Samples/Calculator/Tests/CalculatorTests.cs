@@ -1,11 +1,11 @@
 using NUnit.Framework;
 using TMPro;
-using Torben.Calculator;
+using TorbenJuniorUtility.Calculator;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Torben.Tests
+namespace TorbenJuniorUtility.Tests
 {
     public sealed class CalculatorTests
     {

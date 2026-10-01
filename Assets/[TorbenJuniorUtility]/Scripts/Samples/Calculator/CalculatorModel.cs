@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Torben.Calculator
+namespace TorbenJuniorUtility.Calculator
 {
     public enum CalculatorOperation
     {

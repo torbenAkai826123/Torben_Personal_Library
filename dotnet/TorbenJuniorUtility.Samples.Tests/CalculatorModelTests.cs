@@ -1,7 +1,7 @@
 using NUnit.Framework;
-using Torben.Calculator;
+using TorbenJuniorUtility.Calculator;
 
-namespace Torben.Tests
+namespace TorbenJuniorUtility.Tests
 {
     public sealed class CalculatorModelTests
     {

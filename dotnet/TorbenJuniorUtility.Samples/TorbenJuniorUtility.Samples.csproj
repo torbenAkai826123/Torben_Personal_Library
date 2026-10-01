@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 與 Unity 共用原始碼: 只編譯 Samples 中不依賴 Unity 的部分 (對應 noEngineReferences 的 asmdef) -->
+  <PropertyGroup>
+    <!-- 對齊 Unity 6 的 API 相容層級 (.NET Standard 2.1) 與 C# 版本 -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>TorbenJuniorUtility.Samples</AssemblyName>
+    <RootNamespace />
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Runtime/Editor/Tests 子資料夾屬於其他 asmdef, 需引用 Unity, 不納入 -->
+    <Compile Include="../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/*.cs"
+             Exclude="../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/Runtime/**;../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/Editor/**;../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/Tests/**" />
+  </ItemGroup>
+
+</Project>

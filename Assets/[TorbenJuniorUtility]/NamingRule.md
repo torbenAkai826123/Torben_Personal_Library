@@ -383,6 +383,15 @@ When editing existing code:
 
 ---
 
+## 組件名稱
+
+| 用途 | 組件名稱 | namespace |
+| -- | -- | -- |
+| 可重用函式庫 | Torben.Core、Torben.Runtime、Torben.Editor、Torben.Tests.EditMode、Torben.Tests.PlayMode | Torben.<功能> |
+| 本專案專屬（範例、驗證用） | TorbenJuniorUtility.Samples (noEngineReferences)、TorbenJuniorUtility.Samples.Runtime、TorbenJuniorUtility.Samples.Editor、TorbenJuniorUtility.Samples.Tests | TorbenJuniorUtility.<功能> |
+
+---
+
 ## Decision Rule
 
 When uncertain about a name, prioritize in this order:

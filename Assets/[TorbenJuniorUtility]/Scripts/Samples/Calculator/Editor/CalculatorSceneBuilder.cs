@@ -1,5 +1,5 @@
 using TMPro;
-using Torben.Calculator;
+using TorbenJuniorUtility.Calculator;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -7,7 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
 
-namespace Torben.Calculator.Editor
+namespace TorbenJuniorUtility.Calculator.Editor
 {
     public static class CalculatorSceneBuilder
     {

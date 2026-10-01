@@ -1,10 +1,7 @@
 {
   "name": "Torben.Tests.EditMode",
   "references": [
-    "Torben.Core",
-    "TorbenJuniorUtility.Calculator",
-    "UnityEngine.UI",
-    "Unity.TextMeshPro"
+    "Torben.Core"
   ],
   "optionalUnityReferences": [
     "TestAssemblies"
