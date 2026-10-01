@@ -58,6 +58,7 @@ unity list                                    # 列出指令與參數結構 (sch
 unity command <指令名稱> [參數...]             # 執行一個指令
 unity command eval '<C# 程式碼>'              # 若 Editor 提供 eval，可執行任意 C#
 unity recompile                               # 重新編譯並回報編譯錯誤；--strict 連警告也算失敗
+unity command run_tests [參數...]             # 在開著的 Editor 執行測試；test_status 查進度 (參數以 unity list 為準)
 ```
 
 - **指令名稱由 Editor 端定義**：先用 `unity command` 或 `unity list` 查，不要猜名稱。

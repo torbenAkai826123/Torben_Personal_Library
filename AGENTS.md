@@ -84,7 +84,10 @@
 ## 測試
 
 - 改到 Core：執行 `dotnet test`，不受 Editor 是否開啟影響。
-- 改到 Runtime／Editor：依「Unity Editor 批次操作規則」跑 EditMode + PlayMode；Editor 開著時改為提醒使用者在 Test Runner 手動執行。
+- 改到 Runtime／Editor：跑 EditMode + PlayMode。依下列順序選擇工具，前一項無法執行才換下一項，不必事先詢問；換工具時回報前一項失敗的原因：
+  1. Editor 開著且 `unity status` 為 `ready`：用 Unity CLI 讓開著的 Editor 執行測試 (`unity command run_tests`)。
+  2. Editor 關閉：用 Unity CLI 的 `unity test`。
+  3. Unity CLI 無法執行 (未安裝、連不上、指令失敗等)：改用 `Unity.exe` batch mode (見「Unity Editor 批次操作規則」)。此時若 Editor 開著，才提醒使用者關閉 Editor。
 - 新增公開 API 時一併新增測試。
 - 回報時附上實際執行的指令與結果摘要；沒有執行或無法執行時要明說，不可推測為通過。
 
