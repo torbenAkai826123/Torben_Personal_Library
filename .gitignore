@@ -120,6 +120,10 @@ InitTestScene*.unity*
 # 本機臨時文件 (不上傳)
 /docs/ignore/
 
+# 未完成的測試場景與資源 (不上傳); 資料夾 .meta 一併忽略
+/Assets/Exceptions/
+/Assets/Exceptions.meta
+
 # 純 C# 測試環境 (dotnet test): 保留專案檔, 忽略建置輸出
 !/dotnet/**/*.csproj
 !/dotnet/*.sln
