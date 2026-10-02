@@ -28,28 +28,33 @@ dotnet test "dotnet/TorbenJunior.sln"  # 建置並執行全部測試, 退出碼 
 
 ```text
 Assets/[TorbenJuniorUtility]/Scripts/
-├─ Core/       Torben.Core.asmdef (noEngineReferences)
-├─ Runtime/    Torben.Runtime.asmdef → Core
+├─ Core/       Torben.Core.asmdef (noEngineReferences), 含 StateMachine/ 純邏輯
+├─ Runtime/    Torben.Runtime.asmdef → Core, 含 StateMachine/ Unity Host
 ├─ Editor/     Torben.Editor.asmdef (僅 Editor)
 ├─ Tests/
-│  ├─ EditMode/  Torben.Tests.EditMode.asmdef
-│  └─ PlayMode/  Torben.Tests.PlayMode.asmdef
-└─ Samples/Calculator/  Torben.Samples.asmdef (noEngineReferences)
-   ├─ Runtime/  Torben.Samples.Runtime.asmdef
-   ├─ Editor/   Torben.Samples.Editor.asmdef
-   └─ Tests/    Torben.Samples.Tests.asmdef (EditMode)
+│  └─ PlayMode/  Library.Tests.PlayMode.asmdef
+└─ Samples/
+   ├─ Calculator/  Torben.Samples.asmdef (noEngineReferences) → Core
+   │  ├─ Runtime/  Torben.Samples.Runtime.asmdef → Samples/Core/Runtime
+   │  ├─ Editor/   Torben.Samples.Editor.asmdef
+   │  └─ Tests/
+   │     ├─ EditMode/  Samples.Tests.EditMode.asmdef
+   │     └─ PlayMode/  Samples.Tests.PlayMode.asmdef
+   └─ StateMachine/  asmref 指向 Torben.Samples
+      ├─ Runtime/  asmref 指向 Torben.Samples.Runtime
+      └─ Tests/PlayMode/  asmref 指向 Samples.Tests.PlayMode
 dotnet/
 ├─ Torben.Core/                       Compile Include 指向 Assets 內的 Core
-├─ Torben.Core.Tests/                 NUnit 測試 (目前沒有測試)
-├─ Torben.Samples/       Compile Include 指向 Samples, 排除 Runtime/Editor/Tests 子資料夾
-├─ Torben.Samples.Tests/ 計算機的 NUnit 測試, 作為工具鏈的冒煙測試
+├─ Library.Tests/                     狀態機 50 項 NUnit 契約測試
+├─ Torben.Samples/                    Compile Include 指向 Samples, 排除 Runtime/Editor/Tests 子資料夾, 引用 Core
+├─ Samples.Tests/                     計算機 6 項與門鎖示範 2 項 NUnit 測試
 └─ TorbenJunior.sln
 ```
 
 - `Torben.Core.csproj` 以 `**/*.cs` 收進 Core 資料夾所有檔案；在 Core 新增 `.cs` 不需改 csproj。
 - `Torben.Samples.csproj` 收進 `Samples/` 下所有檔案，但排除 `Runtime/`、`Editor/`、`Tests/` 子資料夾 (那些屬於需要 Unity 的 asmdef)。新增範例時沿用相同的資料夾分法即可。
 - dotnet 測試放在 `dotnet/` 底下，不放進 `Assets/`，Unity 不會編譯它們。
-- `Torben.Core.Tests` 目前沒有測試，`dotnet test` 會顯示「未提供任何測試」，但退出碼仍為 0。
+- `Library.Tests/StateMachineContractTests.cs` 將交接包的 42 項 Console 行為案例接為 NUnit 測試, 保留案例名稱與原有判準, 另加 8 項完成結果擷取 (Exit completion、callback 例外、同實例重新進入) 的案例; `dotnet test` 應實際探索並執行全部 50 項。
 - `bin/`、`obj/` 已列入 `.gitignore`；`dotnet/` 底下的 `.csproj`、`.sln` 例外保留在版控中。
 
 ## Core 與 Samples 的限制
@@ -60,7 +65,10 @@ dotnet/
 
 ## 命名與 Unity 驗證
 
-- 自有 namespace 與組件統一以 `Torben` 為根。計算機 Model 與 View 使用 `Torben.Calculator`, Editor 工具使用 `Torben.Calculator.Editor`, 測試使用 `Torben.Calculator.Tests`。
-- `Torben.Samples` 系列組件區分純 C#、Runtime、Editor 與測試的編譯邊界, 不要求 namespace 同步分層。
+- 自有 namespace 與 production 組件以 `Torben` 為根; 測試組件依測試對象及模式命名, 不強制 `Torben` 字首。計算機 Model 與 View 使用 `Torben.Calculator`, Editor 工具使用 `Torben.Calculator.Editor`, 測試使用 `Torben.Calculator.Tests`。
+- `Torben.Samples` 系列組件區分純 C#、Runtime 與 Editor; Unity 範例測試分別編入 `Samples.Tests.EditMode`、`Samples.Tests.PlayMode`, 不要求 namespace 同步分層。純 .NET 測試由 `Library.Tests`、`Samples.Tests` 編譯。
 - `[TorbenJuniorUtility]` 資源根目錄與 `TorbenJunior.sln` 專案名稱保留, 不作為 namespace 根。
-- EditMode 測試驗證計算機邏輯與場景設定; `Scripts/Tests/PlayMode/CalculatorScenePlayModeTests.cs` 驗證場景在 PlayMode 載入後自動初始化及按鈕更新顯示。Unity 測試流程見 [Unity CLI 手冊](unity-cli-pipeline.md)。
+- `Scripts/Samples/Calculator/Tests/EditMode/CalculatorTests.cs` 驗證計算機邏輯與場景設定; `Scripts/Samples/Calculator/Tests/PlayMode/CalculatorScenePlayModeTests.cs` 驗證場景在 PlayMode 載入後自動初始化及按鈕更新顯示。Unity 測試流程見 [Unity CLI 手冊](unity-cli-pipeline.md)。
+- `Scripts/Tests/PlayMode/StateMachineHostTests.cs` 驗證真實 Unity lifecycle 的啟動、Guard Deny、Tick 順序、LastResult、停用/重新啟用與 Fault 停止自動 Tick; `Scripts/Samples/StateMachine/Tests/PlayMode/DoorStateMachineHostTests.cs` 驗證門鎖示範。純邏輯的 `Runtime/` 子資料夾仍位於 Core; 名稱不代表 Unity API 依賴。
+- 接收版本保留 C# 9 `readonly struct` 與區塊 namespace 調整; 沒有匯入交接包的獨立 `Torben.StateMachine.asmdef`。Unity 與 .NET 都將原始碼編入 `Torben.Core`, namespace 維持 `Torben.StateMachine`。
+- .NET 通過不代表 Unity GC 或 IL2CPP Player 已驗證; Core XML 註解標示配置行為, Guards 列舉及 Project lifecycle 的配置需以 Unity 量測。

@@ -5,11 +5,11 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Torben.Core", "Torben.Core\Torben.Core.csproj", "{85C2E7EA-8119-451D-80D6-A881A3344753}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Torben.Core.Tests", "Torben.Core.Tests\Torben.Core.Tests.csproj", "{412BF150-73F2-4000-A29A-8440DD811183}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Library.Tests", "Library.Tests\Library.Tests.csproj", "{412BF150-73F2-4000-A29A-8440DD811183}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Torben.Samples", "Torben.Samples\Torben.Samples.csproj", "{5D05EB47-49A0-448A-B393-55077C0F4553}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Torben.Samples.Tests", "Torben.Samples.Tests\Torben.Samples.Tests.csproj", "{93B909CF-A84E-4DD8-A3A4-FBDEF0F4B59B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Samples.Tests", "Samples.Tests\Samples.Tests.csproj", "{93B909CF-A84E-4DD8-A3A4-FBDEF0F4B59B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -1,7 +1,7 @@
 {
     "name": "Torben.Samples",
     "rootNamespace": "",
-    "references": [],
+    "references": ["Torben.Core"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Torben.Core/Torben.Core.csproj" />
     <!-- Runtime/Editor/Tests 子資料夾屬於其他 asmdef, 需引用 Unity, 不納入 -->
     <Compile Include="../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/*.cs"
              Exclude="../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/Runtime/**;../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/Editor/**;../../Assets/[TorbenJuniorUtility]/Scripts/Samples/**/Tests/**" />
