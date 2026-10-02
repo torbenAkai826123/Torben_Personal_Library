@@ -34,6 +34,7 @@ Guidelines:
 - `TorbenJuniorUtility` is a legacy project/resource-path name, not an allowed namespace root. Existing uses do not establish a second naming convention.
 - Project names and resource paths such as `Assets/[TorbenJuniorUtility]/` and `TorbenJunior.sln` may remain unchanged; they do not determine namespace names.
 - Assembly names express compilation boundaries; namespaces express features. For example, `CalculatorModel` in `Torben.Samples` and `CalculatorView` in `Torben.Samples.Runtime` both use `Torben.Calculator`.
+- The `Torben` namespace root does not require a `Torben` prefix on test assembly, class, or helper names; test naming follows the rules below.
 - Do not add unnecessary category layers such as `Core`, `Common`, `Utility`, or `Framework` unless they represent a real project boundary.
 - Source-code folders do not need to match namespaces.
 - Do not split a small public API into multiple namespaces only because files are stored in different folders.
@@ -382,7 +383,7 @@ When editing existing code:
 - new APIs and new standalone tools should follow the conventions above;
 - when introducing a new subsystem, keep its naming internally consistent even if surrounding legacy code differs.
 
-The single `Torben` root takes precedence over legacy namespace and assembly names when choosing names for new code. Retaining an existing name outside the authorized scope does not permit copying that name into new code. When a task explicitly includes namespace or assembly migration, update legacy names and their references within that scope together; preserve resource GUIDs and verify affected Unity references and tests.
+The single `Torben` root takes precedence over legacy namespace and production assembly names when choosing names for new code. Test assembly names follow the test naming rules below. Retaining an existing name outside the authorized scope does not permit copying a name that violates these rules into new code. When a task explicitly includes namespace or assembly migration, update legacy names and their references within that scope together; preserve resource GUIDs and verify affected Unity references and tests.
 
 ---
 
@@ -390,16 +391,27 @@ The single `Torben` root takes precedence over legacy namespace and assembly nam
 
 | 用途 | 組件名稱 | namespace |
 | -- | -- | -- |
-| 可重用函式庫 | Torben.Core、Torben.Runtime、Torben.Editor、Torben.Tests.EditMode、Torben.Tests.PlayMode | Torben.<功能> |
-| 範例、驗證用 | Torben.Samples (noEngineReferences)、Torben.Samples.Runtime、Torben.Samples.Editor、Torben.Samples.Tests | Torben.<功能>，例如 Torben.Calculator、Torben.Calculator.Editor、Torben.Calculator.Tests |
+| 可重用函式庫本體 | Torben.Core、Torben.Runtime、Torben.Editor | Torben.<功能> |
+| 範例本體與工具 | Torben.Samples (noEngineReferences)、Torben.Samples.Runtime、Torben.Samples.Editor | Torben.<功能>，例如 Torben.Calculator、Torben.Calculator.Editor |
 
-本倉庫自有組件統一使用 `Torben` 根, 不因範例或專案專屬用途改用其他命名根。Unity 的 asmdef 名稱與引用、.NET 的 AssemblyName 與專案引用須保持一致; 組件分層不要求 namespace 同步分層。此處為目標命名規則, 既有程式碼是否已完成遷移須另行驗證。
+本倉庫的函式庫本體、範例本體與工具組件使用 `Torben` 根; 測試組件不強制此字首。所有自有 C# namespace 仍使用 `Torben` 根, 組件名稱不要求 namespace 同步更名。同一組件的 asmdef `name`、引用名稱與 .NET `AssemblyName` 須保持一致; 不同測試邊界的 Unity 與 .NET 測試組件可以各自命名。此處為目標命名規則, 既有程式碼是否已完成遷移須另行驗證。
+
+### 測試名稱與組件邊界
+
+- 測試組件採 PascalCase 與點分隔, 使用 `<測試對象或群組>.Tests[.<模式或必要邊界>]`; 不強制 `Torben` 字首, 也不禁止有理由保留完整被測組件名稱。
+- 例如函式庫共用測試可命名 `Library.Tests.PlayMode`, 範例測試可命名 `Samples.Tests.EditMode`、`Samples.Tests.PlayMode`; 只有已存在功能專屬測試邊界時, 才使用如純 .NET 的 `StateMachine.Tests` 的名稱。這些是命名範例, 不要求建立對應組件。
+- Unity 測試組件以 `EditMode` / `PlayMode` 表達實際執行模式; 由 asmdef 平台設定及測試內容確認模式, 不能只靠名稱判定。純 .NET 測試沒有 Unity 模式時, 使用 `<測試對象或群組>.Tests` 即可。
+- 測試 class 使用 `<被測型別或行為>Tests`, 例如 `StateMachineHostTests`; helper 依角色命名, 例如 `StateMachineProbeHost`。不因 package identity 重複加上 `Torben` 字首。
+- 測試組件只依實際依賴、平台、打包或測試類型拆分, 不比照 production 的 Core / Runtime / Editor 自動展開, 也不因新增功能或資料夾就新增 asmdef。相同邊界的測試優先共用組件。
+- 函式庫測試與範例測試維持依賴邊界: Samples 測試可引用函式庫, 函式庫及其測試不得引用 Samples。
+- 組件名稱必須在 Unity 專案內唯一; 可能與其他 package 碰撞時, 加上足以辨識的功能或 package 名稱, 而非一律套用固定字首。
+- 既有 `Torben.*` 測試組件名稱仍可保留; 修改本規則不代表授權重命名組件、拆分測試或擴張 Public API。實際遷移時須同步處理 asmdef / asmref、引用與 .NET 組件名稱, 保留資源 GUID 並驗證測試。
 
 ---
 
 ## Decision Rule
 
-First satisfy the required `Torben` namespace and assembly root. Within that constraint, prioritize in this order:
+First satisfy the required `Torben` namespace root, production assembly root, and test naming and boundary rules above. Within those constraints, prioritize in this order:
 
 1. Domain meaning
 2. Existing public API consistency

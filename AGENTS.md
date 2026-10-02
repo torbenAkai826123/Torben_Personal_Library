@@ -64,6 +64,8 @@
 - Editor：Editor 專用工具。
 - 新功能先判斷能否放進 Core，不行才放 Runtime。
 - dotnet 測試只驗證邏輯正確性；GC 與效能數字以 Unity Performance Testing 為準。
+- 依賴方向：Samples 可引用函式庫；函式庫 (含其測試組件) 不得引用 Samples。
+- 函式庫的 PlayMode 測試不得整份包在 `#if UNITY_EDITOR` 中，以保留在 Android 實機執行的可能性；範例測試不受此限。
 
 ## 平台
 
