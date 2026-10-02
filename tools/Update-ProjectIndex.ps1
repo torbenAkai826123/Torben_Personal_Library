@@ -285,5 +285,5 @@ Write-JsonAtomic (Join-Path $indexPath 'analysis-cache.json') $cacheDocument
 Write-JsonAtomic (Join-Path $indexPath 'states.json') $stateDocument
 
 Write-Host "Index updated: $($newFiles.Count) files in $($roots.Count) explicit source roots."
-Write-Host "Added: $($added.Count)  Modified: $($modified.Count)  Removed: $($removed.Count)  Moved: $($moves.Count)  Unreviewed: $($contentReview.Count)"
+Write-Host "Added: $($added.Count)  Modified: $($modified.Count)  Removed: $($removed.Count)  Moved: $($moves.Count)  Without valid analysis cache: $($contentReview.Count) (not a to-do list)"
 if ($warnings.Count -gt 0) { Write-Warning ($warnings -join [Environment]::NewLine) }

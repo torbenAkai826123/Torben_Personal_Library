@@ -12,11 +12,12 @@
 
 ## 專案檔案索引
 
-- 以索引協助檔案定位或盤點前，先在倉庫根目錄執行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-ProjectIndex.ps1`，再讀 `project_index/work-queue.json` 與 `project_index/content.json`。
-- 索引範圍、排除項目、GUID／asmdef／asmref 欄位及工作佇列規則見 [`INDEX_WORKFLOW.md`](INDEX_WORKFLOW.md)。
-- 索引是定位與快取提示，不限制為完成當前任務閱讀檔案；依任務需要可直接檢視未變更或未列入工作佇列的來源檔案。不得把「未變更」解讀為「不得閱讀」。
-- 更新器每次都重新列舉核准來源範圍並計算指紋；可偵測 Unity Editor 關閉期間手動新增、修改、刪除及搬移的檔案。不得掃描或手動修改 Unity 產生的 `Library/` 等快取。
-- 新檔案／修改檔案的工作項目會一直保留，直到 `analysis-cache.json` 有相同來源指紋、分析上下文指紋與分析版本的結果。記錄分析結果使用 `tools/Set-ProjectFileAnalysis.ps1`。
+- 已知路徑、單一符號或關鍵字：直接讀檔或搜尋，不要求更新索引。跨目錄盤點、asmdef／asmref 歸屬、GUID 搬移：優先使用索引。
+- 用到索引時才執行 `.\tools\Update-ProjectIndex.ps1`；同一段查詢工作可重用當次索引，相關來源或組件設定改變後再更新。
+- 以 `.\tools\Find-ProjectIndex.ps1` 依路徑、組件或 GUID 篩選；不要把 `project_index/` 的 JSON 整份讀進 context。
+- 索引不是完整資產參照圖；場景／Prefab 對 GUID 的引用仍需搜尋來源。索引也不限制閱讀範圍，不得把「未變更」解讀為「不得閱讀」。不得掃描或手動修改 `Library/` 等 Unity 快取。
+- 分析快取為選用，只記錄有重用價值的分析；「缺少有效分析快取」不是待辦，不需清空。`approved` 等狀態為人工分類，AI 只能依明確授權代為記錄。
+- 詳細操作、輸出格式與索引範圍見 [`INDEX_WORKFLOW.md`](INDEX_WORKFLOW.md)。
 
 ## 協作原則（必做）
 
