@@ -10,6 +10,14 @@
 - 通常不改：`Packages/`、第三方 Asset、名稱含 `backup` 的目錄（除非任務點名）
 - 命名原則：`.\Assets\[TorbenJuniorUtility]\NamingRule.md` 若有建立原則檔案，優先以該檔案原則優先，沒有則依同類型最小必要原則命名。
 
+## 專案檔案索引
+
+- 以索引協助檔案定位或盤點前，先在倉庫根目錄執行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-ProjectIndex.ps1`，再讀 `project_index/work-queue.json` 與 `project_index/content.json`。
+- 索引範圍、排除項目、GUID／asmdef／asmref 欄位及工作佇列規則見 [`INDEX_WORKFLOW.md`](INDEX_WORKFLOW.md)。
+- 索引是定位與快取提示，不限制為完成當前任務閱讀檔案；依任務需要可直接檢視未變更或未列入工作佇列的來源檔案。不得把「未變更」解讀為「不得閱讀」。
+- 更新器每次都重新列舉核准來源範圍並計算指紋；可偵測 Unity Editor 關閉期間手動新增、修改、刪除及搬移的檔案。不得掃描或手動修改 Unity 產生的 `Library/` 等快取。
+- 新檔案／修改檔案的工作項目會一直保留，直到 `analysis-cache.json` 有相同來源指紋、分析上下文指紋與分析版本的結果。記錄分析結果使用 `tools/Set-ProjectFileAnalysis.ps1`。
+
 ## 協作原則（必做）
 
 通案原則；可複製到其他專案。
