@@ -7,6 +7,7 @@
 - 慣例：遊戲／工具程式優先放在專案根下的 `Scripts/`（以既有目錄名為準，不存在才新建），不要散落在 `Assets/` 根層或其他套件目錄
 - 先讀：專案根內 README／docs（若有）；產生的說明預設放倉庫根的 `./docs/`
 - 請求收件匣：`docs/inbox/`；格式與處理方式見 [`docs/inbox/README.md`](docs/inbox/README.md)
+- 使用者手冊：`docs/manual/` 放給使用者閱讀的入門與操作說明，不是規則來源；內容與本檔或 `docs/` 其他文件衝突時，以後者為準。AI 不需主動讀取，使用者點名時才讀；只在使用者要求撰寫給人看的說明時才在此新增或修改
 - 通常不改：`Packages/`、第三方 Asset、名稱含 `backup` 的目錄（除非任務點名）
 - 命名原則：`.\Assets\[TorbenJuniorUtility]\NamingRule.md` 若有建立原則檔案，優先以該檔案原則優先，沒有則依同類型最小必要原則命名。
 
