@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.10.12224.181
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Torben.Core", "Torben.Core\Torben.Core.csproj", "{85C2E7EA-8119-451D-80D6-A881A3344753}"
 EndProject
@@ -10,6 +10,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Torben.Samples", "Torben.Samples\Torben.Samples.csproj", "{5D05EB47-49A0-448A-B393-55077C0F4553}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Samples.Tests", "Samples.Tests\Samples.Tests.csproj", "{93B909CF-A84E-4DD8-A3A4-FBDEF0F4B59B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "Common\Common.csproj", "{792A9890-C945-4B08-B71E-0642D12B2235}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -69,6 +71,18 @@ Global
 		{93B909CF-A84E-4DD8-A3A4-FBDEF0F4B59B}.Release|x64.Build.0 = Release|Any CPU
 		{93B909CF-A84E-4DD8-A3A4-FBDEF0F4B59B}.Release|x86.ActiveCfg = Release|Any CPU
 		{93B909CF-A84E-4DD8-A3A4-FBDEF0F4B59B}.Release|x86.Build.0 = Release|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Debug|x64.Build.0 = Debug|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Debug|x86.Build.0 = Debug|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Release|Any CPU.Build.0 = Release|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Release|x64.ActiveCfg = Release|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Release|x64.Build.0 = Release|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Release|x86.ActiveCfg = Release|Any CPU
+		{792A9890-C945-4B08-B71E-0642D12B2235}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
