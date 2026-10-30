@@ -119,6 +119,7 @@ InitTestScene*.unity*
 
 # 本機臨時文件 (不上傳)
 /docs/ignore/
+.DS_Store
 
 # 未完成的測試場景與資源 (不上傳); 資料夾 .meta 一併忽略
 /Assets/Exceptions/
