@@ -10,35 +10,33 @@
 
 ## 更新
 
-用到索引時才更新，不要求每次 session 開始更新：
+用到索引時才更新，不要求每次 session 開始更新。工具是 C# 單檔程式 [`tools/ProjectIndex/ProjectIndex.cs`](tools/ProjectIndex/ProjectIndex.cs)，只需要 .NET 10 SDK，macOS 與 Windows 用同一個指令，在倉庫根目錄執行：
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-ProjectIndex.ps1
+```bash
+dotnet tools/ProjectIndex/ProjectIndex.cs update
 ```
 
 - 同一段查詢工作可重用當次索引；相關來源或組件設定 (asmdef／asmref／`.meta`) 改變後，下一次索引查詢前再更新。
 - 更新器每次重新列舉核准的來源根並計算 SHA-256，能偵測 Editor 關閉期間手動新增、修改、刪除及搬移的檔案，不依賴 Editor 是否開啟。
-- 執行成本：約 190 個檔案時，本機實測 1.4～7.6 秒 (後者為冷啟動)。它只寫入 `project_index/`，主控台輸出只有摘要兩行。
+- 執行成本：約 200 個檔案時，macOS 本機實測約 0.3 秒；工具本身改過後的第一次執行要重新編譯，約 9 秒。它只寫入 `project_index/`，主控台輸出只有摘要兩行。
 - `changes.json` 只代表與**前一次掃描**的差異，每次更新都會覆寫。它不是 session 或長期的變更歷史；需要歷史時看 git。
 
 ## 查詢
 
-用查詢入口取得任務需要的項目，不要把 `project_index/` 的 JSON 整份讀進 context (`content.json` 約 420 KB、`work-queue.json` 約 95 KB)：
+用查詢入口取得任務需要的項目，不要把 `project_index/` 的 JSON 整份讀進 context (`content.json` 約 130 KB、`work-queue.json` 約 55 KB)：
 
-```powershell
-.\tools\Find-ProjectIndex.ps1 -Path "Samples/StateMachine/*.cs"
-.\tools\Find-ProjectIndex.ps1 -Assembly "Samples.Tests.PlayMode"
-.\tools\Find-ProjectIndex.ps1 -Guid fa9d5289e2444204859332fb8a0cc04e
+```bash
+dotnet tools/ProjectIndex/ProjectIndex.cs find --path "Samples/StateMachine/*.cs"
+dotnet tools/ProjectIndex/ProjectIndex.cs find --assembly "Samples.Tests.PlayMode"
+dotnet tools/ProjectIndex/ProjectIndex.cs find --guid fa9d5289e2444204859332fb8a0cc04e
 ```
 
-從 Bash 等其他 shell 呼叫時，改用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tools/Find-ProjectIndex.ps1 <參數>`。
-
-- `-Path`：不分大小寫的子字串比對；只有 `*`、`?` 是萬用字元，`[TorbenJuniorUtility]` 的方括號視為一般字元。
-- `-Assembly`：組件名稱完全比對 (不分大小寫)；先列出定義該組件的 asmdef／asmref，再列出歸屬檔案，經 asmref 加入者標 `(asmref)`。
-- `-Guid`：比對資產自身的 GUID；資料夾以 `folder` 列出。
+- `--path`：不分大小寫的子字串比對；只有 `*`、`?` 是萬用字元，`[TorbenJuniorUtility]` 的方括號視為一般字元。含 `*` 的參數要加引號，避免被 shell 展開。
+- `--assembly`：組件名稱完全比對 (不分大小寫)；先列出定義該組件的 asmdef／asmref，再列出歸屬檔案，經 asmref 加入者標 `(asmref)`。
+- `--guid`：比對資產自身的 GUID；資料夾以 `folder` 列出。
 - 多個條件同時指定時取交集；至少要指定一個條件，不支援列出全部項目。
-- 預設每行輸出 `類型<Tab>組件<Tab>路徑`，最多 50 筆，超過時提示剩餘筆數 (`-Limit` 可調整)。預設省略 `.meta` 項目 (`-IncludeMeta` 可加入)。
-- `-Detail` 另外輸出 GUID、大小、修改時間、`sha256` 與 `contextHash`。
+- 預設每行輸出 `類型<Tab>組件<Tab>路徑`，最多 50 筆，超過時提示剩餘筆數 (`--limit` 可調整)。預設省略 `.meta` 項目 (`--include-meta` 可加入)。
+- `--detail` 另外輸出 GUID、大小、修改時間、`sha256` 與 `contextHash`。
 - 無匹配時輸出 `matches: 0` 與明確訊息；GUID 無匹配時另外提醒場景／Prefab 引用不在索引內。
 - 警告只列出與結果相關的項目：已不在磁碟上的檔案 (索引可能過期)，以及更新器記錄的相關警告 (例如無法解析的 asmref、重複 GUID)。
 - 查詢入口只讀取索引，不會更新或寫入任何檔案；索引不存在時直接報錯，請先執行更新。
@@ -69,9 +67,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-ProjectIn
 - 根目錄的 `AGENTS.md`、`CLAUDE.md`、`README.md`、`INDEX_WORKFLOW.md`、`.gitignore`
 - `Packages/manifest.json` 與 `Packages/packages-lock.json`
 
-任何路徑中含 `backup` 的檔案或資料夾，以及 `Library/`、`Temp/`、`Logs/`、`Obj/`、Build 輸出、`bin/`、`obj/`、`node_modules/`、`.git/`、`PackageCache/` 和封存目錄均排除。
+任何路徑中含 `backup` 的檔案或資料夾，以及 `Obj/`、Build 輸出、`bin/`、`obj/`、`node_modules/`、`.git/`、`PackageCache/`、`.DS_Store` 和封存目錄均排除。`Library/`、`Temp/`、`Logs/`、`UserSettings/` 只在專案根那一層排除，所以 `Scripts/Core/Logs/` 這類同名的來源目錄仍會收錄。
 
-其他 `Assets/` 目錄不在預設範圍，包含第三方資源與 `Assets/Exceptions/`。若日後有需要索引的自有資產根目錄，應先把明確路徑加到更新器的 `$roots` 清單，並確認排除規則涵蓋該路徑中的產生物。
+其他 `Assets/` 目錄不在預設範圍，包含第三方資源與 `Assets/Exceptions/`。若日後有需要索引的自有資產根目錄，應先把明確路徑加到更新器的來源根清單 (`Update` 方法中的 `roots`)，並確認排除規則涵蓋該路徑中的產生物。工具的完整規格見 [`tools/ProjectIndex/README.md`](tools/ProjectIndex/README.md)。
 
 ## 分析快取 (選用)
 
@@ -79,14 +77,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-ProjectIn
 - 更新器輸出的 `Without valid analysis cache` (JSON 中為 `unreviewedCount`／`contentReview`) 只表示「缺少有效分析快取」，不代表未讀、待辦或未完成工作，不需要人工清空。
 - 快取只有在來源 SHA-256、分析上下文指紋及 `analysisVersion` 全部相符時才有效。
 
-儲存時，以 `Find-ProjectIndex.ps1 -Path <檔案> -Detail` 取得 `sha256` 與 `contextHash`：
+儲存時，以 `find --path <檔案> --detail` 取得 `sha256` 與 `contextHash`：
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Set-ProjectFileAnalysis.ps1 `
-  -Path "Assets/[TorbenJuniorUtility]/Scripts/Core/Example.cs" `
-  -SourceHash "<sha256>" `
-  -ContextHash "<contextHash>" `
-  -AnalysisJson '{"summary":"已確認 Example 的責任與主要呼叫關係。"}'
+```bash
+dotnet tools/ProjectIndex/ProjectIndex.cs set-analysis \
+  --path "Assets/[TorbenJuniorUtility]/Scripts/Core/Example.cs" \
+  --source-hash "<sha256>" \
+  --context-hash "<contextHash>" \
+  --analysis-json '{"summary":"已確認 Example 的責任與主要呼叫關係。"}'
 ```
 
 工具會比對索引指紋與來源檔目前的 SHA-256。來源在檢視後若已變更，工具會拒絕記錄過時分析；先重新更新索引再取得新指紋。
@@ -95,11 +93,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Set-ProjectFileA
 
 `approved` 等狀態是人工分類，不取代內容分析或 hash 驗證。AI 只能依使用者明確授權代為記錄，不可因測試通過等理由自行核准或變更狀態：
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Set-ProjectFileStatus.ps1 `
-  -Path "Assets/[TorbenJuniorUtility]/Scripts/Core/Example.cs" `
-  -Status approved `
-  -Reason "人工確認"
+```bash
+dotnet tools/ProjectIndex/ProjectIndex.cs set-status \
+  --path "Assets/[TorbenJuniorUtility]/Scripts/Core/Example.cs" \
+  --status approved \
+  --reason "人工確認"
 ```
 
 可用狀態為 `unclassified`、`draft`、`approved`、`withdrawn`、`deprecated`。資產透過 GUID 搬移時，狀態隨資產路徑遷移。

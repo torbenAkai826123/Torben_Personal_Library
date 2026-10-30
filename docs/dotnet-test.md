@@ -19,7 +19,7 @@
 
 在倉庫根目錄執行。路徑含空白與 `[TorbenJuniorUtility]`，一律加引號。
 
-```powershell
+```bash
 dotnet --version                       # 確認 SDK
 dotnet test "dotnet/TorbenJunior.sln"  # 建置並執行全部測試, 退出碼 0 表示通過
 ```

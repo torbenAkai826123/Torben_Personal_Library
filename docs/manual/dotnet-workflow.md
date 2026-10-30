@@ -124,13 +124,13 @@ NUnit 版本是 3.x，`Assert.That` 的寫法與 Unity Test Framework 相同。
 
 在倉庫根目錄執行 (路徑含空白與 `[` `]`，一律加引號)：
 
-```powershell
+```bash
 dotnet test "dotnet/TorbenJunior.sln"
 ```
 
 最後出現 `已通過!` 且 `失敗: 0` 就代表通過。只想跑剛寫的測試時：
 
-```powershell
+```bash
 dotnet test "dotnet/Library.Tests/Library.Tests.csproj" --filter "FullyQualifiedName~Cooldown"
 ```
 
@@ -146,7 +146,7 @@ dotnet test "dotnet/Library.Tests/Library.Tests.csproj" --filter "FullyQualified
 
 想用 `Console.WriteLine` 快速試寫法、不打算留下測試時，可以在 `dotnet/` 底下建立 console 專案 (例如 `dotnet/Common/`)。它不在 `Assets/` 裡，不會影響 Unity。
 
-```powershell
+```bash
 dotnet new console -n Common -o "dotnet/Common"
 dotnet sln "dotnet/TorbenJunior.sln" add "dotnet/Common/Common.csproj"
 dotnet run --project "dotnet/Common"

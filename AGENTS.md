@@ -14,11 +14,19 @@
 ## 專案檔案索引
 
 - 已知路徑、單一符號或關鍵字：直接讀檔或搜尋，不要求更新索引。跨目錄盤點、asmdef／asmref 歸屬、GUID 搬移：優先使用索引。
-- 用到索引時才執行 `.\tools\Update-ProjectIndex.ps1`；同一段查詢工作可重用當次索引，相關來源或組件設定改變後再更新。
-- 以 `.\tools\Find-ProjectIndex.ps1` 依路徑、組件或 GUID 篩選；不要把 `project_index/` 的 JSON 整份讀進 context。
+- 用到索引時才執行 `dotnet tools/ProjectIndex/ProjectIndex.cs update`；同一段查詢工作可重用當次索引，相關來源或組件設定改變後再更新。
+- 以 `dotnet tools/ProjectIndex/ProjectIndex.cs find` 依路徑、組件或 GUID 篩選；不要把 `project_index/` 的 JSON 整份讀進 context。
 - 索引不是完整資產參照圖；場景／Prefab 對 GUID 的引用仍需搜尋來源。索引也不限制閱讀範圍，不得把「未變更」解讀為「不得閱讀」。不得掃描或手動修改 `Library/` 等 Unity 快取。
 - 分析快取為選用，只記錄有重用價值的分析；「缺少有效分析快取」不是待辦，不需清空。`approved` 等狀態為人工分類，AI 只能依明確授權代為記錄。
 - 詳細操作、輸出格式與索引範圍見 [`INDEX_WORKFLOW.md`](INDEX_WORKFLOW.md)。
+
+## 專案工具 (`tools/`) 與作業系統
+
+- 開發環境目前以 macOS 為主，但要保留在 Windows 開發的可能。
+- 每個工具一個資料夾：`tools/{工具名稱}/`。可跨平台的實作直接放在工具資料夾；只能在特定系統執行的實作放 `tools/{工具名稱}/{OS}/` (例如 `macOS/`、`Windows/`)。
+- 優先寫兩個系統都能執行的版本，優先使用專案已經需要的工具 (例如 dotnet)，不為此另外引入新的執行環境。做不到時只寫目前作業系統的版本，不預先寫其他系統的指令或腳本。
+- 每個工具資料夾放一份 `README.md` 製作指令，寫明用途、介面、輸出格式、各系統的實作與驗證狀態，以及驗證情境，讓之後在其他系統開發的人可以照著實作。這份檔案不受「產生的說明只放 `./docs/`」的限制。
+- 文件裡的指令範例以目前作業系統的寫法為準；未在目前系統驗證過的內容要標明。
 
 ## 協作原則（必做）
 
@@ -47,8 +55,8 @@
 
 ## Unity Editor 批次操作規則
 
-- 用語：本專案的「Unity CLI」專指 Unity 官方的 `unity` 命令列工具，操作方式見 [`docs/unity-cli-pipeline.md`](docs/unity-cli-pipeline.md)；用它時僅以已知設定確認其安裝、登入與 Unity Pipeline 連線，缺少其中任何一項就回報，不自行搜尋或安裝。本節其餘規則針對以 `Unity.exe` 命令列參數 (`-batchmode` 等) 直接啟動 Editor 的批次操作；請求寫「batch mode」或「Unity.exe」時用此方式。
-- 執行前讀 [`docs/unity-batchmode.md`](docs/unity-batchmode.md)；依 `ProjectSettings/ProjectVersion.txt` 核對 Editor 版本，確認 `Unity.exe` 實際路徑、專案根路徑、Git 原有變更及同專案是否已在 Editor 開啟。不可讓同一專案同時在 Editor 與 batch mode 執行；不要擅自關閉使用者的 Editor。
+- 用語：本專案的「Unity CLI」專指 Unity 官方的 `unity` 命令列工具，操作方式見 [`docs/unity-cli-pipeline.md`](docs/unity-cli-pipeline.md)；用它時僅以已知設定確認其安裝、登入與 Unity Pipeline 連線，缺少其中任何一項就回報，不自行搜尋或安裝。本節其餘規則針對以 Editor 執行檔 (macOS 為 `Unity.app/Contents/MacOS/Unity`，Windows 為 `Unity.exe`) 加命令列參數 (`-batchmode` 等) 直接啟動 Editor 的批次操作；請求寫「batch mode」、「Unity.exe」或「Editor 執行檔」時用此方式。
+- 執行前讀 [`docs/unity-batchmode.md`](docs/unity-batchmode.md)；依 `ProjectSettings/ProjectVersion.txt` 核對 Editor 版本，確認 Editor 執行檔的實際路徑、專案根路徑、Git 原有變更及同專案是否已在 Editor 開啟。不可讓同一專案同時在 Editor 與 batch mode 執行；不要擅自關閉使用者的 Editor。
 - 命令列操作仍受本檔的目標與檔案範圍限制。已授權範圍內的路徑、編譯或測試阻礙可自行排除並回報；需要改變目標、關閉使用中的 Editor、修改禁止範圍或做不可逆操作時才詢問。
 - 以 `-projectPath` 指向倉庫根目錄；記錄退出碼、Editor 日誌及測試結果。執行前後比較檔案差異，區分原有變更與本次變更。Unity 產生的 `Library/` 等暫存內容不得手動修改或提交；對意外變更不可逕自覆蓋、重置或當成本次成果。
 - 授權失敗時依手冊保留日誌並判斷是否有可排除的環境原因；只在條件確實改變且取得必要執行權限時，用同一已設定工具重試一次。產物已寫出不代表成功：退出碼非零、程序崩潰或測試結果缺失時，該次執行視為失敗；產物須另行驗證，未驗證前不得宣稱完成。
@@ -76,12 +84,21 @@
 - 新功能先判斷能否放進 Core，不行才放 Runtime。
 - dotnet 測試只驗證邏輯正確性；GC 與效能數字以 Unity Performance Testing 為準。
 - 依賴方向：Samples 可引用函式庫；函式庫 (含其測試組件) 不得引用 Samples。
-- 函式庫的 PlayMode 測試不得整份包在 `#if UNITY_EDITOR` 中，以保留在 Android 實機執行的可能性；範例測試不受此限。
+- 函式庫 (通用與平台限定) 的 PlayMode 測試不得整份包在 `#if UNITY_EDITOR` 中，以保留在行動裝置實機執行的可能性；範例測試與專案內工具的測試不受此限。
 
 ## 平台
 
-- 目標平台：PC + Android；Android 使用 IL2CPP（AOT）。
-- 避免執行期反射、`System.Reflection.Emit`、`dynamic`；必要的反射需加 `[Preserve]` 或 `link.xml`。
+- 目標平台：PC (Windows、macOS)、Android、iOS。行動平台都用 IL2CPP (AOT)；iOS 只能用 IL2CPP，執行期不能產生程式碼。
+- 程式依發佈範圍分三類，平台限制的嚴格程度不同：
+  1. **通用** (預設)：要能在所有目標平台執行，遵守下方的 AOT 限制。
+  2. **平台限定**：用 asmdef 的 `includePlatforms` 或 `#if UNITY_ANDROID`、`#if UNITY_IOS` 等方式限定編譯範圍，只需符合所列平台的限制；在 XML 註解或模組 README 標明支援的平台。
+  3. **專案內工具**：Editor 組件的工具，或倉庫根 `tools/` 的輔助程式。只在本專案開發時使用、不隨函式庫發佈，不受目標平台限制 (`tools/` 的作業系統規則見「專案工具 (`tools/`) 與作業系統」一節)。
+- 平台相容性是軟限制，不是禁止事項：
+  - 寫到可能讓某些目標平台無法執行的功能時，AI 先用一句話提醒會影響哪些平台、原因與替代做法。
+  - 使用者確認需要時，把該程式歸為平台限定並限定編譯範圍，不當成錯誤，之後也不再反覆提醒。
+  - 已知風險：執行期反射 (可能被 IL2CPP 裁掉)、`System.Reflection.Emit`、`dynamic`、執行期才決定型別的泛型、原生外掛 (各平台格式不同)、檔案系統路徑與權限、執行緒與背景執行。
+- 通用類避免執行期反射、`System.Reflection.Emit`、`dynamic`；必要的反射需加 `[Preserve]` 或 `link.xml`。
+- 宣稱支援某個平台前，要在該平台建置或實機驗證過；沒驗證過就標明「未驗證」，不可推測為可用。
 
 ## GC 與效能
 
@@ -100,7 +117,7 @@
 - 改到 Runtime／Editor：跑 EditMode + PlayMode。依下列順序選擇工具，前一項無法執行才換下一項，不必事先詢問；換工具時回報前一項失敗的原因：
   1. Editor 開著且 `unity status` 為 `ready`：用 Unity CLI 讓開著的 Editor 執行測試 (`unity command run_tests`)。
   2. Editor 關閉：用 Unity CLI 的 `unity test`。
-  3. Unity CLI 無法執行 (未安裝、連不上、指令失敗等)：改用 `Unity.exe` batch mode (見「Unity Editor 批次操作規則」)。此時若 Editor 開著，才提醒使用者關閉 Editor。
+  3. Unity CLI 無法執行 (未安裝、連不上、指令失敗等)：改用 Editor 執行檔的 batch mode (見「Unity Editor 批次操作規則」)。此時若 Editor 開著，才提醒使用者關閉 Editor。
 - 新增公開 API 時一併新增測試。
 - 回報時附上實際執行的指令與結果摘要；沒有執行或無法執行時要明說，不可推測為通過。
 
