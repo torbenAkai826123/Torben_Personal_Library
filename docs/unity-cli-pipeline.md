@@ -153,8 +153,8 @@ unity build . --list-targets
 
 - **batch mode 可能改到 `ProjectSettings/`**：2026-10-01 執行 `unity test` 後，當時安裝的 `com.unity.ai.inference` 套件 (之後已移除) 自動從 `ProjectSettings/ProjectSettings.asset` 的 `scriptingDefineSymbols` 移除了 `SENTIS_ANALYTICS_ENABLED`。執行後務必用 `git status` 比對；這類變更不是任務成果，應回報使用者決定保留或還原。
 - **macOS 上 batch mode 首次匯入當機**：2026-10-30 在 AI 工具的 shell (macOS 沙箱) 中執行 `unity test`，Editor 匯入 shader 時於 Burst 編譯器 (`Burst.Compiler.IL.Server.LibraryCompiler:CompileMethodGroupImpl`) 以 SIGBUS 當機，退出碼 6。由使用者在一般終端機以 `unity open .` 開啟並完成匯入後，改用開著的 Editor 執行測試即正常。沙箱是否為原因尚未驗證。
-- **macOS 上開啟專案會產生換行符號差異**：`.gitattributes` 設定 `* text=auto eol=crlf`，但 macOS 上的 Unity 存檔時寫 LF，被重新存檔的資產會出現在 `git status`，`git diff` 卻沒有內容差異。這類檔案不是實際變更，不需處理。
-- **動態字型會在顯示文字時自動補字**：TextMeshPro 字型資源若為動態模式 (`m_AtlasPopulationMode: 1`)，Editor 或 PlayMode 測試顯示文字時會把缺少的字與圖集寫回 `SDF.asset`。提交前檢查字型檔差異，不需要的動態資料以 Inspector 的 Clear Dynamic Data 清除並存檔。
+- **macOS 上開啟專案會產生換行符號差異**：`.gitattributes` 設定 `* text=auto eol=crlf`，但 macOS 上的 Unity 存檔時寫 LF，被重新存檔的資產會出現在 `git status`，`git diff` 卻沒有內容差異。這類檔案屬於 `AGENTS.md` 的「不用提交」：`git add` 後不會產生變更，`git status` 的標記也會消失。
+- **動態字型會在顯示文字時自動補字**：TextMeshPro 字型資源若為動態模式 (`m_AtlasPopulationMode: 1`)，Editor 或 PlayMode 測試顯示文字時會把缺少的字與圖集寫回 `SDF.asset`；開著的場景若用到該字型，Clear Dynamic Data 後也會立刻補回。這是預期雜訊，依 `AGENTS.md` 歸為「不獨立提交」，只有異常時才回報。
 - **日誌含存取權杖**：`unity test` 寫入 `~/Library/Logs/Unity/Editor.log` 的啟動參數含 `-accessToken`。分享日誌前先移除該行。
 - CLI 每次執行會送出一筆匿名使用量資料；設定 `UNITY_NO_CRASH_REPORT` 只會關閉當機回報，`UNITY_NO_CLI_INVOKED_TELEMETRY` 可關閉使用量 ping。
 - `unity skill show` 會印出 CLI 內建、給 AI 代理用的完整操作指南，版本更新後可用它核對本手冊。
