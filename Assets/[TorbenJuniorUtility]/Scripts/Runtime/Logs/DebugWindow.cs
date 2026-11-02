@@ -1,0 +1,346 @@
+using UnityEngine;
+
+namespace Torben
+{
+    /// <summary>
+    /// 在遊戲畫面上顯示最近的 Log 訊息 (IMGUI 視窗).
+    /// 由 DebugLogs.isGUILog 開關; 元件掛在跨場景的 CrossObject 上, 第一次開啟時才建立.
+    /// 設定 (大小、位置、篩選、顏色...) 都是靜態的, 視窗建立前就可以先設定.
+    /// </summary>
+    public class DebugWindow : MonoBehaviour
+    {
+        private const int Capacity = 200;
+        private const int WindowId = 0x4C4F47;
+        private const float Margin = 10f;
+        private const float TitleBarHeight = 18f;
+
+        private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
+        private static readonly int levelCount = levelNames.Length;
+
+        // ---- 靜態狀態 ----
+        private static LogHistorySink history;
+        private static DebugWindow current;
+        private static bool wantVisible;
+        private static bool sceneLoaded;    // AfterSceneLoad 之前不建立 GameObject
+
+        // ---- 靜態設定 ----
+        private static Vector2 size;
+        private static Vector2 position;
+        private static bool hasCustomPosition;  // false = 預設右下角
+        private static bool draggable;
+        private static bool autoScroll;
+        private static float scale;             // 0 = 依螢幕 DPI 自動
+        private static string searchText;
+        private static bool[] levelVisible;
+        private static string[] levelColors;
+        private static int filterVersion;       // 篩選條件改變時遞增
+        private static int styleVersion;        // 顏色改變時遞增 (需要重組字串)
+
+        // ---- 元件狀態 ----
+        private readonly LogEntry[] snapshot = new LogEntry[Capacity];
+        private readonly string[] lines = new string[Capacity];
+        private readonly int[] visible = new int[Capacity];
+        private int count;
+        private int visibleCount;
+        private int seenVersion;
+        private int seenFilterVersion = -1;
+        private int seenStyleVersion = -1;
+        private bool hasSnapshot;
+        private Vector2 scroll;
+        private GUI.WindowFunction drawWindow;
+        private GUIStyle lineStyle;
+        private GUIContent[] levelToggleLabels;
+
+        // 確保尚未進入 Play (未經 DebugLogs.Install) 時存取設定也有預設值
+        static DebugWindow() => ResetStatics();
+
+        // ==== 公開設定 ====
+
+        /// <summary>最近訊息的歷史紀錄 (最多 200 筆). 啟動時建立, 視窗未開啟也會持續記錄.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static LogHistorySink History => history;
+
+        /// <summary>視窗大小 (縮放前的單位). 預設 200 x 120.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static Vector2 Size
+        {
+            get => size;
+            set => size = new Vector2(Mathf.Max(80f, value.x), Mathf.Max(60f, value.y));
+        }
+
+        /// <summary>視窗左上角位置 (縮放前的單位). 設定後不再自動貼齊右下角; 拖曳也會更新此值.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static Vector2 Position
+        {
+            get => hasCustomPosition ? position : DefaultPosition(EffectiveScale());
+            set
+            {
+                position = value;
+                hasCustomPosition = true;
+            }
+        }
+
+        /// <summary>恢復預設位置 (右下角).</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static void ResetPosition() => hasCustomPosition = false;
+
+        /// <summary>是否可以拖曳標題列移動視窗. 預設開啟.</summary>
+        public static bool IsDraggable
+        {
+            get => draggable;
+            set => draggable = value;
+        }
+
+        /// <summary>有新訊息時是否自動捲到最下方. 預設開啟.</summary>
+        public static bool AutoScroll
+        {
+            get => autoScroll;
+            set => autoScroll = value;
+        }
+
+        /// <summary>介面縮放倍率; 0 表示依螢幕 DPI 自動計算 (以 96 DPI 為 1 倍). 預設 0.</summary>
+        public static float Scale
+        {
+            get => scale;
+            set => scale = Mathf.Max(0f, value);
+        }
+
+        /// <summary>搜尋文字 (比對分類標籤與訊息, 不分大小寫); 空字串表示不篩選.</summary>
+        /// <remarks>配置: 零配置; 比對在篩選條件或訊息改變時才執行.</remarks>
+        public static string SearchText
+        {
+            get => searchText;
+            set
+            {
+                value ??= string.Empty;
+                if (value == searchText) return;
+                searchText = value;
+                filterVersion++;
+            }
+        }
+
+        /// <summary>是否顯示某個等級的訊息. 預設全部顯示.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static bool IsLevelVisible(LogLevel level) => levelVisible[LevelIndex(level)];
+
+        /// <summary>設定是否顯示某個等級的訊息.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static void SetLevelVisible(LogLevel level, bool isVisible)
+        {
+            int index = LevelIndex(level);
+            if (levelVisible[index] == isVisible) return;
+            levelVisible[index] = isVisible;
+            filterVersion++;
+        }
+
+        /// <summary>某個等級訊息文字的顏色 (例如 "#FF6B6B"); null 或空字串表示使用預設文字顏色.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static string GetLevelColor(LogLevel level) => levelColors[LevelIndex(level)];
+
+        /// <summary>設定某個等級訊息文字的顏色. 分類標籤的顏色由各 LogCategory 的 tagColorHex 決定.</summary>
+        /// <remarks>配置: 零配置; 下次繪製時重組所有顯示字串 (每次變更配置一次).</remarks>
+        public static void SetLevelColor(LogLevel level, string levelColorHex)
+        {
+            levelColors[LevelIndex(level)] = levelColorHex;
+            styleVersion++;
+        }
+
+        // ==== 安裝與顯示 (由 DebugLogs 呼叫) ====
+
+        // 重設所有靜態狀態並建立新的歷史紀錄. 在 SubsystemRegistration 階段由 DebugLogs.Install 呼叫.
+        internal static LogHistorySink ResetStatics()
+        {
+            history = new LogHistorySink(Capacity);
+            current = null;
+            wantVisible = false;
+            sceneLoaded = false;
+
+            size = new Vector2(600f, 180f);
+            position = Vector2.zero;
+            hasCustomPosition = false;
+            draggable = true;
+            autoScroll = true;
+            scale = 0f;
+            searchText = string.Empty;
+            levelVisible = new bool[levelCount];
+            for (int i = 0; i < levelCount; i++) levelVisible[i] = true;
+            levelColors = new string[levelCount];
+            levelColors[(int)LogLevel.Warning] = "#FFD54F";
+            levelColors[(int)LogLevel.Error] = "#FF6B6B";
+            levelColors[(int)LogLevel.Debug] = "#9E9E9E";
+            filterVersion = 0;
+            styleVersion = 0;
+            return history;
+        }
+
+        // 顯示 / 隱藏. 隱藏時設 enabled = false, OnGUI 完全不會被呼叫.
+        internal static void SetVisible(bool isVisible)
+        {
+            wantVisible = isVisible;
+            if (isVisible)
+            {
+                if (!sceneLoaded) return;   // 等 AfterSceneLoad 再建立
+                EnsureInstance();
+                current.enabled = true;
+            }
+            else if (current != null)
+            {
+                current.enabled = false;
+            }
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void OnAfterSceneLoad()
+        {
+            sceneLoaded = true;
+            if (wantVisible) SetVisible(true);
+        }
+
+        // 掛到 CrossObject 上, 跟著它跨場景存在, 也跟著它一起釋放
+        private static void EnsureInstance()
+        {
+            if (current != null) return;
+            var host = CrossObject.Instance.gameObject;
+            current = host.GetComponent<DebugWindow>();
+            if (current == null) current = host.AddComponent<DebugWindow>();
+        }
+
+        // ==== 元件生命週期 ====
+
+        private void Awake()
+        {
+            drawWindow = DrawWindow;    // 先快取委派, 避免每幀配置
+            levelToggleLabels = new GUIContent[levelCount];
+            for (int i = 0; i < levelCount; i++)
+                levelToggleLabels[i] = new GUIContent(levelNames[i].Substring(0, 1), levelNames[i]);
+        }
+
+        private void OnDestroy()
+        {
+            // CrossObject 被銷毀時一併清掉參照; 下次開啟會重新建立
+            if (current == this) current = null;
+        }
+
+        private void OnGUI()
+        {
+            if (history == null) return;
+            if (lineStyle == null)
+                lineStyle = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true, margin = new RectOffset(2, 2, 0, 0) };
+
+            float s = EffectiveScale();
+            var oldMatrix = GUI.matrix;
+            GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
+
+            var rect = new Rect(Position, size);
+            var moved = GUI.Window(WindowId, rect, drawWindow, "Log");
+            if (draggable && moved.position != rect.position) Position = moved.position;
+
+            GUI.matrix = oldMatrix;
+        }
+
+        private void DrawWindow(int id)
+        {
+            // 只在 Layout 事件更新資料, 讓 Layout 與 Repaint 畫出的控制項數量一致
+            if (Event.current.type == EventType.Layout) Refresh();
+
+            GUILayout.BeginHorizontal();
+            for (int i = 0; i < levelCount; i++)
+            {
+                bool isOn = GUILayout.Toggle(levelVisible[i], levelToggleLabels[i]);
+                if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
+            }
+            GUILayout.EndHorizontal();
+
+            SearchText = GUILayout.TextField(searchText);
+
+            scroll = GUILayout.BeginScrollView(scroll);
+            for (int i = 0; i < visibleCount; i++)
+                GUILayout.Label(lines[visible[i]], lineStyle);
+            GUILayout.EndScrollView();
+
+            if (draggable) GUI.DragWindow(new Rect(0f, 0f, 10000f, TitleBarHeight));
+        }
+
+        // 有新訊息時只組新進來的字串; 顏色改變時全部重組; 篩選條件或內容改變時重算可見清單
+        private void Refresh()
+        {
+            bool linesChanged = false;
+            if (!hasSnapshot || history.Version != seenVersion || seenStyleVersion != styleVersion)
+            {
+                int oldCount = count;
+                count = history.CopyTo(snapshot, out int version);
+                int added = unchecked(version - seenVersion);
+
+                if (!hasSnapshot || seenStyleVersion != styleVersion || added < 0 || added >= count)
+                {
+                    for (int i = 0; i < count; i++) lines[i] = Format(snapshot[i]);
+                }
+                else
+                {
+                    // 舊字串往前移, 只組新進來的
+                    int overlap = count - added;
+                    int shiftFrom = oldCount - overlap;
+                    if (shiftFrom > 0) System.Array.Copy(lines, shiftFrom, lines, 0, overlap);
+                    for (int i = overlap; i < count; i++) lines[i] = Format(snapshot[i]);
+                }
+
+                linesChanged = added != 0 || !hasSnapshot;
+                hasSnapshot = true;
+                seenVersion = version;
+                seenStyleVersion = styleVersion;
+                seenFilterVersion = -1;
+            }
+
+            if (seenFilterVersion != filterVersion)
+            {
+                RebuildVisible();
+                seenFilterVersion = filterVersion;
+            }
+
+            if (linesChanged && autoScroll) scroll.y = float.MaxValue;
+        }
+
+        private void RebuildVisible()
+        {
+            visibleCount = 0;
+            bool hasSearch = searchText.Length > 0;
+            for (int i = 0; i < count; i++)
+            {
+                var entry = snapshot[i];
+                if (!levelVisible[LevelIndex(entry.Level)]) continue;
+                if (hasSearch && !Contains(entry.Message, searchText) && !Contains(entry.Category?.Tag, searchText)) continue;
+                visible[visibleCount++] = i;
+            }
+        }
+
+        private static string Format(in LogEntry entry)
+        {
+            string tag = entry.Category?.Tag ?? string.Empty;
+            string tagColor = entry.Category?.tagColorHex;
+            if (tag.Length > 0 && !string.IsNullOrEmpty(tagColor)) tag = $"<color={tagColor}>{tag}</color>";
+            string levelColor = levelColors[LevelIndex(entry.Level)];
+            return string.IsNullOrEmpty(levelColor) ? tag + entry.Message : $"{tag}<color={levelColor}>{entry.Message}</color>";
+        }
+
+        private static bool Contains(string text, string value) =>
+            text != null && text.IndexOf(value, System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static int LevelIndex(LogLevel level)
+        {
+            int index = (int)level;
+            return index >= 0 && index < levelCount ? index : 0;
+        }
+
+        // 以 96 DPI 為 1 倍; 取不到 DPI 時 (Screen.dpi 為 0) 用 1 倍
+        private static float EffectiveScale()
+        {
+            if (scale > 0f) return scale;
+            float dpi = Screen.dpi;
+            return dpi > 0f ? Mathf.Max(1f, dpi / 96f) : 1f;
+        }
+
+        private static Vector2 DefaultPosition(float s) =>
+            new Vector2(Screen.width / s - size.x - Margin, Screen.height / s - size.y - Margin);
+    }
+
+}
