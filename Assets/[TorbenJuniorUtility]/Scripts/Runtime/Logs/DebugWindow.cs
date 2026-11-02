@@ -54,6 +54,8 @@ namespace Torben
         private GUIContent clearLabel;
         private GUIContent closeLabel;
         private bool dragging;
+        private bool clearArmed;    // 清除狀態: 第一次點 Clear 進入, 再點一次才真的清除
+        private bool clearPressed;  // 清除狀態下按住 Clear 中
 
         // 確保尚未進入 Play (未經 DebugLogs.Install) 時存取設定也有預設值
         static DebugWindow() => ResetStatics();
@@ -261,7 +263,12 @@ namespace Torben
         private void DrawWindow(int id)
         {
             // 只在 Layout 事件更新資料, 讓 Layout 與 Repaint 畫出的控制項數量一致
-            if (Event.current.type == EventType.Layout) Refresh();
+            var e = Event.current;
+            if (e.type == EventType.Layout) Refresh();
+
+            // 先記下按下位置: 其他控制項處理後會把事件標成 Used, 到 Clear 時就讀不到了
+            bool isMouseDown = e.type == EventType.MouseDown && new Rect(Vector2.zero, size).Contains(e.mousePosition);
+            Vector2 mouseDownPosition = e.mousePosition;
 
             GUILayout.BeginHorizontal();
             for (int i = 0; i < levelCount; i++)
@@ -270,11 +277,7 @@ namespace Torben
                 if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
             }
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(clearLabel))
-            {
-                history.Clear();
-                scroll = Vector2.zero;
-            }
+            DrawClearButton(isMouseDown, mouseDownPosition);
             if (GUILayout.Button(closeLabel)) DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
             GUILayout.EndHorizontal();
 
@@ -286,6 +289,36 @@ namespace Torben
             GUILayout.EndScrollView();
 
             if (draggable) GUI.DragWindow(new Rect(0f, 0f, 10000f, TitleBarHeight));
+        }
+
+        // 第一次點擊進入清除狀態 (黃色), 清除狀態下再點才清除 (按住時紅色, 放開後恢復原色);
+        // 在視窗其他位置按下滑鼠就取消清除狀態
+        private void DrawClearButton(bool isMouseDown, Vector2 mouseDownPosition)
+        {
+            var rect = GUILayoutUtility.GetRect(clearLabel, GUI.skin.button);
+            if (isMouseDown)
+            {
+                if (rect.Contains(mouseDownPosition)) clearPressed = clearArmed;
+                else clearArmed = clearPressed = false;
+            }
+            else if (GUIUtility.hotControl == 0)
+            {
+                clearPressed = false;   // 在按鈕外放開, 沒有觸發點擊
+            }
+
+            var oldColor = GUI.backgroundColor;
+            if (clearArmed) GUI.backgroundColor = clearPressed ? Color.red : Color.yellow;
+            if (GUI.Button(rect, clearLabel))
+            {
+                if (clearArmed)
+                {
+                    history.Clear();
+                    scroll = Vector2.zero;
+                }
+                clearArmed = !clearArmed;
+                clearPressed = false;
+            }
+            GUI.backgroundColor = oldColor;
         }
 
         // 有新訊息時只組新進來的字串; 顏色改變時全部重組; 篩選條件或內容改變時重算可見清單
