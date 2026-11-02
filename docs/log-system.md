@@ -22,7 +22,9 @@ Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟
 | 檔案 | 組件 | 責任 |
 |---|---|---|
 | `Scripts/Core/Logs/Log.cs` | Torben.Core | 對外入口; 總開關與 Debug 開關; 管理 sink 清單 |
-| `Scripts/Core/Logs/LogModels.cs` | Torben.Core | `LogLevel`、`ILogSink`、`LogEntry` |
+| `Scripts/Core/Logs/LogModels.cs` | Torben.Core | `LogLevel`、`ILogSink`、`LogEntry`、`LogArgsEnd` |
+| `Scripts/Core/Logs/LogStackTrace.cs` | Torben.Core | 堆疊追蹤 (擷取時只存框架, 讀取時才轉文字) |
+| `Scripts/Core/Logs/LogText.cs` | Torben.Core | 顯示用文字轉換: 時間、短路徑、解析 Unity 堆疊位置 |
 | `Scripts/Core/Logs/LogCategory.cs` | Torben.Core | 分類標籤 (`Tag`) 與標籤顏色 (`tagColorHex`) |
 | `Scripts/Core/Logs/LogHistorySink.cs` | Torben.Core | 固定容量環狀緩衝區, 保留最新的 N 筆 |
 | `Scripts/Runtime/Logs/DebugLogs.cs` | Torben.Runtime | Console 輸出; 啟動時安裝 sink; `isGUILog` 開關; 收集 Unity 引擎訊息 |
@@ -70,8 +72,9 @@ Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟
 
 | 成員 | 說明 | 配置 |
 |---|---|---|
-| `Information / Warning / Error / Debug(message, category = null)` | 產生訊息並送給每個 sink; `category` 為 null 時使用空分類 | 本身零配置; 各 sink 自行決定 |
+| `Information / Warning / Error / Debug(message, category = null)` | 產生訊息並送給每個 sink; `category` 為 null 時使用空分類 | 本身零配置 (開啟堆疊追蹤的等級每次配置); 各 sink 自行決定 |
 | `InformationFormat / WarningFormat / ErrorFormat / DebugFormat([category,] format, arg1[, arg2[, arg3]])` | 開啟時才以 `string.Format` 組字串; 分類放第一個參數 | 關閉時零配置; 開啟時每次呼叫配置 (字串、值型別裝箱) |
+| `IsStackTraceEnabled(level)` / `SetStackTraceEnabled(level, bool)` | 該等級是否擷取堆疊追蹤; 預設只有 Error。隨時可改, 只影響之後的訊息 | 零配置 |
 | `IsEnabled(level)` | 該等級的訊息目前是否會送到 sink (`isPrintLog`、至少一個 sink、Debug 另需 `isDebugLog`) | 零配置 |
 | `AddSink(ILogSink)` | 加入 sink; 已存在或 null 時不做事 | 每次呼叫配置新陣列 |
 | `RemoveSink(ILogSink)` | 移除 sink; 不存在時不做事 | 有移除時配置新陣列 |
@@ -97,7 +100,25 @@ if (Log.IsEnabled(LogLevel.Debug))                     // 需要較複雜的組�
 - `format` 格式錯誤時 `string.Format` 丟出的 `FormatException` 會傳回呼叫端。
 - 字串常值 (例如 `Log.Debug("ready")`) 不配置, 照原本寫法即可。
 
-自訂 sink 只需實作 `ILogSink.Write(in LogEntry entry)`, 再用 `Log.AddSink` 加入。`LogEntry` 包含 `Level`、`Category`、`Message`。
+### 呼叫端位置與堆疊追蹤
+
+- 每個公開的寫入方法 (含 `XxxFormat`) 最後都有 `LogArgsEnd argsEnd`、`[CallerMemberName]`、`[CallerFilePath]`、`[CallerLineNumber]` 四個選填參數, 由編譯器在呼叫處填入, 不要自己傳。值是編譯期常數, 執行時不配置。
+- 呼叫端參數必須宣告在每個公開方法上 (編譯器只填入「被呼叫的方法」的參數), 無法集中到一個方法。
+- `LogArgsEnd` 是分隔用的空結構: 沒有它時, `InformationFormat("{0}{1}{2}", a, b, "c")` 會被編譯器選成 2 參數版本, 把 `"c"` 當成 `callerMemberName`; 有它之後多傳的參數會變成型別不符, 選到正確的多載或編譯失敗。
+- `[CallerFilePath]` 是編譯時的完整路徑, 建置版的執行檔裡會留有建置機器上的路徑字串。
+- 堆疊追蹤用 `System.Diagnostics.StackTrace` 擷取, 只存框架; 第一次讀取 `LogStackTrace.Text` 時才轉成文字 (去掉最上方 `Torben.Log` 自己的框架) 並快取。檔名與行號是否存在依平台與建置設定而定 (Editor 有; Mono 建置版、IL2CPP 的行號**未驗證**)。
+- Unity Console 點兩下仍會跳到 `DebugLogs.Write`。`[HideInCallstack]` 無法解決 (2026-11-02 查 6000.5.5f1 的 `UnityEditor.CoreModule.dll`): 它是 `UnityEditor.ConsoleWindow` 用 `TypeCache` 收集被標記的方法, 只在 Console 開啟「Strip logging callstack」時從詳細區的堆疊文字去掉這些框架; 屬性本身在各平台的 `UnityEngine.CoreModule` 都存在, 但只在 Editor 的 Console 有作用。`Log` 在 Core 不能引用 `UnityEngine`, 無法標記, 堆疊中仍會留下 `Torben.Log` 的框架。改用畫面視窗的位置連結開啟呼叫端。
+
+### LogEntry
+
+自訂 sink 只需實作 `ILogSink.Write(in LogEntry entry)`, 再用 `Log.AddSink` 加入。
+
+| 欄位 | 說明 |
+|---|---|
+| `Level`、`Category`、`Message` | 等級、分類、訊息 |
+| `Time` | 寫入時間 (`DateTime.UtcNow`, UTC); 以 3 個參數建構時為 `default` |
+| `CallerFilePath`、`CallerMemberName`、`CallerLineNumber` | 呼叫端位置; Unity 引擎訊息沒有 (`HasCaller` 為 false) |
+| `StackTrace` | `LogStackTrace`; 該等級未開啟擷取時為 null。Unity 引擎訊息存 Unity 提供的堆疊文字 (不受 `SetStackTraceEnabled` 影響, 內容依 Unity 的 Stack Trace Logging 設定) |
 
 ## LogCategory
 
@@ -136,22 +157,48 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `SearchText` | `""` | 搜尋文字; 比對標籤與訊息, 不分大小寫 |
 | `IsLevelVisible(level)` / `SetLevelVisible(level, bool)` | 全部顯示 | 依等級篩選; 視窗上方 N / W / E / D 開關同步此設定 |
 | `History.Clear()` | — | 清空 Log 歷史紀錄; 視窗的 Clear 按鈕也是呼叫它 |
+| `ShowTime` | `false` | 在訊息下方第二行開頭顯示時間 `(HH:mm:ss.ff)` (當地時間); 視窗的 Time 開關同步此設定 |
+| `ShowLocation` | `false` | 在第二行顯示發生位置 `檔案:行號`; Log 訊息為呼叫端, Unity 訊息取堆疊中第一個有原始碼位置的框架; 視窗的 Loc 開關同步此設定 |
+| `Collapse` | `false` | 合併相同訊息; 視窗的 Collapse 開關同步此設定 |
 | `GetLevelColor(level)` / `SetLevelColor(level, hex)` | Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`、Normal 無 | 訊息文字顏色; null 或空字串表示預設文字色 |
 
 ### 視窗操作
 
-- 上方一列: N / W / E / D 等級開關、Log / Unity 來源開關、`Clear`、`X`; 下方為搜尋框與捲動清單。
+- 上方一列: N / W / E / D 等級開關、Log / Unity 來源開關、`Clear`、`X`; 第二列: 搜尋框、`Time`、`Loc`、`Collapse` 開關; 下方為捲動清單。
+- 每筆最左側為行號 `[n]`: 不合併時在清單中的順序 (套用篩選後, 從 1 開始)。
+- 行號右邊為 `+` / `-` 展開按鈕, 展開後以小一級的字顯示堆疊追蹤; 沒有堆疊追蹤時按鈕呈現無法使用。
+- 行號、展開按鈕、次數膠囊都以訊息第一行文字的中線垂直置中 (依字型實際行高計算)。
+- 列與列之間有 1px 分隔線, 也當作檢查對齊的參考線。
+- `Time` / `Loc` 開啟時, 訊息下方多一行小字 (與訊息間多留 2px): `(時間)  路徑:行號`。Editor 中點擊路徑會開啟該檔案 (專案內的檔案用 `AssetDatabase.OpenAsset`, 與 Console 相同); 建置版只顯示。
+- `Collapse`: 等級、分類 (同一實例)、內容與呼叫端位置都相同的訊息合併成一列, 顯示在第一次出現的位置並沿用其行號 (同 Unity Console), 最右側以膠囊標籤顯示次數; 合併多次的列不顯示時間。只合併仍在紀錄中的訊息 (兩份紀錄各最新 200 筆), 被擠掉的不計入次數。
 - 兩份紀錄依寫入順序 (`LogHistorySink` 共用的流水號) 合併顯示; 來源、等級、搜尋三種篩選同時套用。
 - `Clear` 只清 Log 訊息, Unity 訊息保留 (避免重要的引擎錯誤一起被刪)。Unity 訊息只會因超過 200 筆被擠掉或重新進入 Play 而消失。
 - `Clear` 為兩段式確認: 第一次點擊進入清除狀態 (按鈕變黃), 再點一次才清除 (按住時紅色); 在視窗其他位置按下滑鼠即取消。
 - `X` 等同 `DebugLogs.isGUILog = false`, 一併恢復 Console 輸出。
 - 開啟視窗與拖曳結束時: 寬或高超過畫面時改為畫面該方向的一半; 自訂位置超出畫面時拉回邊緣。
 
+### 可調整的外觀參數
+
+都是 `DebugWindow.cs` 裡的常數或 `CreateStyles()` 中的值, 沒有公開 API; 改程式後重新編譯生效。
+
+| 位置 | 目前值 | 作用 |
+|---|---|---|
+| `FoldWidth` | `18f` | 展開按鈕寬度; 第二行與堆疊追蹤的縮排也依此計算 |
+| `FoldHeight` | `14f` | 展開按鈕高度; 改了仍會自動置中 |
+| `BadgeHeight` | `16f` | 次數膠囊高度; 膠囊貼圖與左右圓角半徑依此產生 |
+| `DetailOffset` | `2f` | 第二行 (時間、位置) 與訊息之間多留的距離 |
+| `separatorColor` | 白色, 透明度 `0.12f` | 列分隔線顏色 |
+| `CreateStyles()` 的 `textCenter` | `padding.top + lineHeight / 2` | 三個小元件的置中基準; 整體偏高或偏低時在這裡加減幾 px, 三者一起移動 |
+| `CreateStyles()` 的 `detailSize` | 主訊息字型大小 - 2 (最小 8) | 第二行、堆疊追蹤、行號、展開按鈕與膠囊的字型大小 |
+| `CreateCapsuleTexture()` 的像素顏色 | `(110, 110, 110)`, alpha `220` | 膠囊底色 |
+
 ### 繪製與效能
 
 - 只在 IMGUI 的 `Layout` 事件更新資料, 讓 `Layout` 與 `Repaint` 的控制項數量一致, 避免 `Getting control X's position...` 例外。
 - 用 `LogHistorySink.CopyTo(dest, sequences, out version)` 在同一次鎖定內取得資料、流水號與版本號; 兩份紀錄各自只為新進來的幾筆組字串, 舊字串直接搬移。改變等級顏色時才全部重組。
-- 篩選與搜尋只在條件或內容改變時重算。
+- 篩選與搜尋只在條件或內容改變時重算。合併相同訊息時一併重新分組 (重用同一個 `Dictionary`)。
+- 時間、位置、行號與次數字串都在第一次顯示時才組, 之後快取。膠囊標籤的貼圖在建立樣式時產生一次 (16 × 16), 元件銷毀時釋放。
+- 展開按鈕與 Time / Loc 開關的變更延到下一個 `Layout` 事件才套用。展開狀態以流水號記錄, 新訊息進來或篩選改變時不會錯位。
 - 隱藏時設 `enabled = false`, `OnGUI` 完全不會被呼叫。
 - GUILayout 本身每幀會有少量配置, 無法完全消除; 以除錯視窗而言可接受。
 
@@ -171,7 +218,8 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | 檔案 | 類型 | 內容 |
 |---|---|---|
 | `dotnet/Library.Tests/LogTests.cs` | dotnet | 多 sink、重複加入、移除、`HasSink`、`isDebugLog`、`isPrintLog`、`IsEnabled`、`XxxFormat` (含關閉時不格式化參數)、`SystemCategory` 標籤 |
+| `dotnet/Library.Tests/LogEntryInfoTests.cs` | dotnet | 呼叫端位置 (含 `XxxFormat` 與 3 個字串參數的多載選擇)、UTC 時間、堆疊追蹤預設值與開關、堆疊從呼叫端開始、`LogText` 的時間 / 路徑 / Unity 位置解析 |
 | `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號、`Clear`、容量小於 1 時丟例外、流水號遞增且跨紀錄共用 |
-| `Scripts/Tests/PlayMode/DebugWindowTests.cs` | PlayMode | 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置、Unity 訊息收集 / 不重複收自己的 Log / `isUnityLog` 關閉 / 不受 `isPrintLog` 影響、清 Log 不影響 Unity、來源篩選設定 |
+| `Scripts/Tests/PlayMode/DebugWindowTests.cs` | PlayMode | 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置、Unity 訊息收集 / 不重複收自己的 Log / `isUnityLog` 關閉 / 不受 `isPrintLog` 影響、清 Log 不影響 Unity、來源篩選設定、顯示設定 (Time / Loc / Collapse) 讀寫、Log 紀錄帶時間與呼叫端、Unity 訊息帶時間與堆疊位置、開啟所有顯示選項時繪製不出錯 |
 
-執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋、Log / Unity 合併順序與開關) 需在 Play 時人工確認。
+執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋、Log / Unity 合併順序與開關、展開按鈕、第二行字體大小、點擊路徑開檔、合併次數) 需在 Play 時人工確認。

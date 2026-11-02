@@ -26,6 +26,9 @@ public sealed class DebugWindowTests
         DebugLogs.isUnityLog = true;
         DebugWindow.ShowLogMessages = true;
         DebugWindow.ShowUnityMessages = true;
+        DebugWindow.ShowTime = false;
+        DebugWindow.ShowLocation = false;
+        DebugWindow.Collapse = false;
         DebugWindow.ResetPosition();
         DebugWindow.SearchText = string.Empty;
         foreach (LogLevel level in System.Enum.GetValues(typeof(LogLevel)))
@@ -252,5 +255,69 @@ public sealed class DebugWindowTests
 
         Assert.That(DebugWindow.ShowLogMessages, Is.False);
         Assert.That(DebugWindow.ShowUnityMessages, Is.False);
+    }
+
+    [Test]
+    public void DisplaySettings_DefaultOffAndRoundTrip()
+    {
+        Assert.That(DebugWindow.ShowTime, Is.False);
+        Assert.That(DebugWindow.ShowLocation, Is.False);
+        Assert.That(DebugWindow.Collapse, Is.False);
+
+        DebugWindow.ShowTime = true;
+        DebugWindow.ShowLocation = true;
+        DebugWindow.Collapse = true;
+
+        Assert.That(DebugWindow.ShowTime, Is.True);
+        Assert.That(DebugWindow.ShowLocation, Is.True);
+        Assert.That(DebugWindow.Collapse, Is.True);
+    }
+
+    [Test]
+    public void Log_HistoryHasTimeAndCaller()
+    {
+        Log.Information("caller");
+        LogAssert.Expect(LogType.Log, "caller");
+
+        var entry = Latest(DebugWindow.History);
+        Assert.That(entry.Time, Is.Not.EqualTo(default(System.DateTime)));
+        Assert.That(entry.CallerMemberName, Is.EqualTo(nameof(Log_HistoryHasTimeAndCaller)));
+        Assert.That(entry.CallerFilePath, Does.EndWith("DebugWindowTests.cs"));
+    }
+
+    [Test]
+    public void UnityLog_RecordsTimeAndStackTrace()
+    {
+        Debug.LogWarning("with stack");
+        LogAssert.Expect(LogType.Warning, "with stack");
+
+        var entry = Latest(DebugWindow.UnityHistory);
+        Assert.That(entry.Time, Is.Not.EqualTo(default(System.DateTime)));
+        Assert.That(entry.StackTrace, Is.Not.Null);
+        Assert.That(LogText.TryParseUnityLocation(entry.StackTrace.Text, out string path, out int line), Is.True);
+        Assert.That(path, Does.EndWith("DebugWindowTests.cs"));
+        Assert.That(line, Is.GreaterThan(0));
+    }
+
+    // 開啟所有顯示選項並畫幾個影格; OnGUI 出錯時 Unity 會記錄錯誤, 測試就會失敗
+    [UnityTest]
+    public IEnumerator Window_DrawsWithTimeLocationAndCollapse()
+    {
+        DebugWindow.ShowTime = true;
+        DebugWindow.ShowLocation = true;
+        DebugWindow.Collapse = true;
+        DebugLogs.isGUILog = true;
+        for (int i = 0; i < 3; i++) Log.Information("repeat");
+        Log.Error("error with stack");
+        Debug.Log("engine message");
+        LogAssert.Expect(LogType.Log, "engine message");
+        yield return null;
+        yield return null;
+
+        DebugWindow.Collapse = false;
+        yield return null;
+        yield return null;
+
+        Assert.That(CrossObject.Instance.GetComponent<DebugWindow>().enabled, Is.True);
     }
 }

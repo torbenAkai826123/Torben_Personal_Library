@@ -69,13 +69,15 @@ namespace Torben
             }
         }
 
-        // 可能在任何執行緒觸發; 寫入的 LogHistorySink 有加鎖
+        // 可能在任何執行緒觸發; 寫入的 LogHistorySink 有加鎖.
+        // 堆疊文字由 Unity 提供, 不受 Log.SetStackTraceEnabled 影響; 是否有內容依 Unity 的 Stack Trace Logging 設定
         private static void OnUnityLog(string condition, string stackTrace, LogType type)
         {
             if (writingConsole) return;
             var history = DebugWindow.UnityHistory;
             if (history == null) return;
-            history.Write(new LogEntry(ToLevel(type), UnityLogCategory.Instance, condition));
+            history.Write(new LogEntry(ToLevel(type), UnityLogCategory.Instance, condition, System.DateTime.UtcNow,
+                null, null, 0, LogStackTrace.FromText(stackTrace)));
         }
 
         private static LogLevel ToLevel(LogType type)

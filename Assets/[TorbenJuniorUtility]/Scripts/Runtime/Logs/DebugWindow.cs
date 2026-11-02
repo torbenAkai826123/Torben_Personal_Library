@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Torben
@@ -14,9 +15,16 @@ namespace Torben
         private const float Margin = 10f;
         private const float TitleBarHeight = 18f;
         private const float ReferenceHeight = 720f;   // 自動縮放時, 畫面高 720 為 1 倍
+        private const float FoldWidth = 18f;          // 每筆左側展開按鈕的寬度
+        private const float BadgeHeight = 16f;        // 合併次數膠囊的高度
+        private const float FoldHeight = 14f;         // 展開按鈕的高度
+        private static readonly Color separatorColor = new Color(1f, 1f, 1f, 0.12f);   // 列分隔線
+        private const float DetailOffset = 2f;        // 第二行與訊息之間多留的距離
 
         private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
         private static readonly int levelCount = levelNames.Length;
+        private static readonly string[] countTexts = new string[Capacity * 2 + 1];  // "[n]" 快取
+        private static readonly string[] countNumberTexts = new string[Capacity * 2 + 1];  // "n" 快取
 
         // ---- 靜態狀態 ----
         private static LogHistorySink history;
@@ -37,6 +45,9 @@ namespace Torben
         private static bool showLogMessages;
         private static bool showUnityMessages;
         private static string[] levelColors;
+        private static bool showTime;
+        private static bool showLocation;
+        private static bool collapse;
         private static int filterVersion;       // 篩選條件改變時遞增
         private static int styleVersion;        // 顏色改變時遞增 (需要重組字串)
 
@@ -45,16 +56,44 @@ namespace Torben
         private readonly Source unitySource = new Source();
         private readonly int[] visible = new int[Capacity * 2]; // 小於 Capacity 為 logSource 的索引, 否則為 unitySource 的索引 + Capacity
         private int visibleCount;
+        // 合併相同訊息用; 索引規則同 visible
+        private readonly int[] order = new int[Capacity * 2];               // 篩選後依先後排序的索引
+        private readonly int[] groupOf = new int[Capacity * 2];             // 每筆所屬的群組
+        private readonly int[] previousOccurrence = new int[Capacity * 2];  // 同群組上一次出現的索引, -1 為沒有
+        private readonly int[] groupLast = new int[Capacity * 2];           // 群組最後一次出現的索引
+        private readonly int[] groupCount = new int[Capacity * 2];
+        private readonly Dictionary<GroupKey, int> groupIds = new Dictionary<GroupKey, int>(Capacity * 2);
+        private readonly int[] numberOf = new int[Capacity * 2];            // 行號: 不合併時在清單中的順序 (從 1 開始)
+        // 展開狀態: 以流水號記錄, 新訊息進來或篩選改變時不會跑掉
+        private readonly HashSet<long> expanded = new HashSet<long>();
+        private readonly bool[] rowExpanded = new bool[Capacity * 2];
+        private int pendingToggleRow = -1;  // 按下展開按鈕的列, 下一次 Layout 才套用, 避免同一事件內控制項數量改變
+        private bool rowsCollapsed;         // 上次重算可見清單時的合併設定
+        private bool drawTime;              // 本次 Layout 的顯示設定
+        private bool drawLocation;
+        private string projectRoot;         // Editor 中為專案根目錄, 用來縮短路徑; 建置版為 null
         private int seenFilterVersion = -1;
         private int seenStyleVersion = -1;
         private Vector2 scroll;
         private GUI.WindowFunction drawWindow;
         private GUIStyle lineStyle;
+        private GUIStyle detailStyle;       // 第二行與展開內容: 比主訊息小一級
+        private GUIStyle inlineDetailStyle;
+        private GUIStyle linkStyle;
+        private GUIStyle foldStyle;
+        private GUIStyle numberStyle;
+        private GUIStyle badgeStyle;        // 合併次數的膠囊標籤
+        private Texture2D badgeTexture;
         private GUIContent[] levelToggleLabels;
         private GUIContent logSourceLabel;
         private GUIContent unitySourceLabel;
         private GUIContent clearLabel;
         private GUIContent closeLabel;
+        private GUIContent timeLabel;
+        private GUIContent locationLabel;
+        private GUIContent collapseLabel;
+        private GUIContent expandRowLabel;
+        private GUIContent collapseRowLabel;
         private bool dragging;
         private bool clearArmed;    // 清除狀態: 第一次點 Clear 進入, 再點一次才真的清除
         private bool clearPressed;  // 清除狀態下按住 Clear 中
@@ -159,6 +198,41 @@ namespace Torben
             }
         }
 
+        /// <summary>是否在訊息下方第二行的開頭顯示時間 (當地時間 HH:mm:ss.ff). 預設關閉; 視窗的 Time 開關同步此設定.</summary>
+        /// <remarks>配置: 零配置; 每筆第一次顯示時配置字串並快取.</remarks>
+        public static bool ShowTime
+        {
+            get => showTime;
+            set => showTime = value;
+        }
+
+        /// <summary>
+        /// 是否在訊息下方第二行顯示發生位置 (檔案:行號). Log 訊息為呼叫端位置; Unity 訊息取堆疊中第一個有原始碼位置的框架.
+        /// Editor 中點擊位置會開啟該檔案; 建置版只顯示. 預設關閉; 視窗的 Loc 開關同步此設定.
+        /// </summary>
+        /// <remarks>配置: 零配置; 每筆第一次顯示時配置字串並快取.</remarks>
+        public static bool ShowLocation
+        {
+            get => showLocation;
+            set => showLocation = value;
+        }
+
+        /// <summary>
+        /// 是否合併相同訊息 (等級、分類、內容與呼叫端位置都相同). 合併後顯示在第一次出現的位置 (沿用其行號), 最右側以膠囊顯示次數,
+        /// 不顯示時間. 只合併仍在紀錄中的訊息 (Log 與 Unity 各最新 200 筆). 預設關閉; 視窗的 Collapse 開關同步此設定.
+        /// </summary>
+        /// <remarks>配置: 零配置; 內容改變時重新分組 (群組表擴充時才配置).</remarks>
+        public static bool Collapse
+        {
+            get => collapse;
+            set
+            {
+                if (collapse == value) return;
+                collapse = value;
+                filterVersion++;
+            }
+        }
+
         /// <summary>是否顯示某個等級的訊息. 預設全部顯示.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool IsLevelVisible(LogLevel level) => levelVisible[LevelIndex(level)];
@@ -211,6 +285,9 @@ namespace Torben
             levelColors[(int)LogLevel.Warning] = "#FFD54F";
             levelColors[(int)LogLevel.Error] = "#FF6B6B";
             levelColors[(int)LogLevel.Debug] = "#9E9E9E";
+            showTime = false;
+            showLocation = false;
+            collapse = false;
             filterVersion = 0;
             styleVersion = 0;
             return history;
@@ -261,10 +338,19 @@ namespace Torben
             unitySourceLabel = new GUIContent("Unity", "Unity engine messages");
             clearLabel = new GUIContent("Clear", "Clear Log messages (Unity messages are kept)");
             closeLabel = new GUIContent("X", "Close");
+            timeLabel = new GUIContent("Time", "Show time");
+            locationLabel = new GUIContent("Loc", "Show source location");
+            collapseLabel = new GUIContent("Collapse", "Collapse identical messages");
+            expandRowLabel = new GUIContent("+", "Expand");
+            collapseRowLabel = new GUIContent("-", "Fold");
+#if UNITY_EDITOR
+            projectRoot = System.IO.Path.GetDirectoryName(Application.dataPath);
+#endif
         }
 
         private void OnDestroy()
         {
+            if (badgeTexture != null) Destroy(badgeTexture);
             // CrossObject 被銷毀時一併清掉參照; 下次開啟會重新建立
             if (current == this) current = null;
         }
@@ -272,8 +358,7 @@ namespace Torben
         private void OnGUI()
         {
             if (history == null || unityHistory == null) return;
-            if (lineStyle == null)
-                lineStyle = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true, margin = new RectOffset(2, 2, 0, 0) };
+            if (lineStyle == null) CreateStyles();
 
             float s = EffectiveScale();
             var oldMatrix = GUI.matrix;
@@ -320,17 +405,192 @@ namespace Torben
             if (GUILayout.Button(closeLabel)) DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
             GUILayout.EndHorizontal();
 
+            GUILayout.BeginHorizontal();
             SearchText = GUILayout.TextField(searchText);
+            ShowTime = GUILayout.Toggle(showTime, timeLabel, GUILayout.ExpandWidth(false));
+            ShowLocation = GUILayout.Toggle(showLocation, locationLabel, GUILayout.ExpandWidth(false));
+            Collapse = GUILayout.Toggle(collapse, collapseLabel, GUILayout.ExpandWidth(false));
+            GUILayout.EndHorizontal();
 
             scroll = GUILayout.BeginScrollView(scroll);
-            for (int i = 0; i < visibleCount; i++)
-            {
-                int index = visible[i];
-                GUILayout.Label(index < Capacity ? logSource.Lines[index] : unitySource.Lines[index - Capacity], lineStyle);
-            }
+            for (int row = 0; row < visibleCount; row++) DrawRow(row);
             GUILayout.EndScrollView();
 
             if (draggable) GUI.DragWindow(new Rect(0f, 0f, 10000f, TitleBarHeight));
+        }
+
+        private void CreateStyles()
+        {
+            lineStyle = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true, margin = new RectOffset(2, 2, 0, 0) };
+            // 字型大小 0 表示用字型預設大小; 第二行比主訊息小一級 (2 點)
+            int baseSize = lineStyle.fontSize > 0 ? lineStyle.fontSize
+                : GUI.skin.font != null && GUI.skin.font.fontSize > 0 ? GUI.skin.font.fontSize : 13;
+            int detailSize = Mathf.Max(8, baseSize - 2);
+            detailStyle = new GUIStyle(lineStyle) { richText = false, fontSize = detailSize };
+            detailStyle.normal.textColor = new Color(0.72f, 0.72f, 0.72f);
+            inlineDetailStyle = new GUIStyle(detailStyle) { wordWrap = false };
+            linkStyle = new GUIStyle(inlineDetailStyle);
+            linkStyle.normal.textColor = new Color(0.5f, 0.7f, 1f);
+            linkStyle.hover.textColor = new Color(0.7f, 0.85f, 1f);
+            // 第一行左右的小元件 (行號、展開按鈕、次數膠囊) 都以訊息第一行文字的中線置中
+            float textCenter = lineStyle.padding.top + lineStyle.lineHeight * 0.5f;
+            foldStyle = new GUIStyle(GUI.skin.button) { fontSize = detailSize, padding = new RectOffset(0, 0, 0, 0), fixedHeight = FoldHeight };
+            foldStyle.margin = new RectOffset(2, 2, CenterOffset(textCenter, FoldHeight), 0);
+            numberStyle = new GUIStyle(inlineDetailStyle);
+            numberStyle.margin = new RectOffset(2, 0, CenterOffset(textCenter, numberStyle.padding.top * 2f + numberStyle.lineHeight), 0);
+            // 行號欄寬固定, 以最大可能的行號計算, 讓訊息左緣對齊
+            numberStyle.fixedWidth = numberStyle.CalcSize(new GUIContent(CountText(Capacity * 2))).x;
+
+            badgeTexture = CreateCapsuleTexture(BadgeHeight);
+            int radius = (int)(BadgeHeight / 2f);
+            badgeStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = detailSize,
+                alignment = TextAnchor.MiddleCenter,
+                border = new RectOffset(radius, radius, radius, radius),
+                padding = new RectOffset(radius - 2, radius - 2, 0, 0),
+                margin = new RectOffset(4, 2, CenterOffset(textCenter, BadgeHeight), 0),
+                fixedHeight = BadgeHeight,
+                wordWrap = false,
+            };
+            badgeStyle.normal.background = badgeTexture;
+            badgeStyle.normal.textColor = Color.white;
+        }
+
+        // 高度 height 的元件要以 center 置中時的上邊距
+        private static int CenterOffset(float center, float height) => Mathf.Max(0, Mathf.RoundToInt(center - height * 0.5f));
+
+        // 左右半圓的白底圓形, 以 border 九宮格拉伸成膠囊; 顏色在像素中直接給定 (灰色半透明)
+        private static Texture2D CreateCapsuleTexture(float height)
+        {
+            int size = Mathf.CeilToInt(height);
+            float radius = size / 2f;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x + 0.5f - radius;
+                    float dy = y + 0.5f - radius;
+                    float alpha = Mathf.Clamp01(radius - Mathf.Sqrt(dx * dx + dy * dy) + 0.5f);   // 邊緣 1px 反鋸齒
+                    pixels[y * size + x] = new Color32(110, 110, 110, (byte)(alpha * 220f));
+                }
+            }
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        // 一筆 (或合併後的一組) 訊息: 第一行為行號 + 展開按鈕 + 訊息 (+ 合併次數); 第二行為時間與位置; 展開時顯示堆疊追蹤
+        private void DrawRow(int row)
+        {
+            if (row > 0) DrawSeparator();
+            int index = visible[row];
+            var source = SourceOf(index, out int i);
+            var stackTrace = source.Snapshot[i].StackTrace;
+            int count = rowsCollapsed ? groupCount[groupOf[index]] : 1;
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(CountText(numberOf[index]), numberStyle);
+            bool oldEnabled = GUI.enabled;
+            GUI.enabled = oldEnabled && stackTrace != null;   // 沒有堆疊追蹤時呈現無法使用
+            if (GUILayout.Button(rowExpanded[row] ? collapseRowLabel : expandRowLabel, foldStyle, GUILayout.Width(FoldWidth)))
+                pendingToggleRow = row;
+            GUI.enabled = oldEnabled;
+            GUILayout.Label(source.Lines[i], lineStyle);
+            if (count > 1) GUILayout.Label(CountNumberText(count), badgeStyle, GUILayout.ExpandWidth(false));
+            GUILayout.EndHorizontal();
+
+            // 合併多次的訊息不顯示時間 (每次出現的時間不同, 只顯示一個沒有意義)
+            bool rowTime = drawTime && count == 1;
+            if (rowTime || drawLocation)
+            {
+                string location = drawLocation ? source.GetLocation(i, projectRoot) : string.Empty;
+                GUILayout.Space(DetailOffset);
+                GUILayout.BeginHorizontal();
+                GUILayout.Space(numberStyle.fixedWidth + FoldWidth + 6f);
+                if (rowTime) GUILayout.Label(source.GetTime(i), inlineDetailStyle, GUILayout.ExpandWidth(false));
+                if (location.Length > 0) DrawLocation(source, i, location);
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+            }
+
+            if (rowExpanded[row] && stackTrace != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Space(numberStyle.fixedWidth + FoldWidth + 6f);
+                GUILayout.Label(stackTrace.Text, detailStyle);
+                GUILayout.EndHorizontal();
+            }
+        }
+
+        // 列與列之間 1px 的分隔線, 也當對齊的參考線
+        private static void DrawSeparator()
+        {
+            var rect = GUILayoutUtility.GetRect(0f, 1f, GUILayout.ExpandWidth(true));
+            if (Event.current.type != EventType.Repaint) return;
+            var oldColor = GUI.color;
+            GUI.color = separatorColor;
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = oldColor;
+        }
+
+        private void DrawLocation(Source source, int i, string location)
+        {
+#if UNITY_EDITOR
+            if (GUILayout.Button(location, linkStyle, GUILayout.ExpandWidth(false)))
+                OpenLocation(source.Snapshot[i], source.LocationFiles[i], source.LocationLines[i]);
+#else
+            GUILayout.Label(location, inlineDetailStyle, GUILayout.ExpandWidth(false));
+#endif
+        }
+
+#if UNITY_EDITOR
+        // 專案內的檔案用 AssetDatabase 開啟 (與 Console 相同的編輯器設定); 找不到資源時直接開啟檔案路徑
+        private static void OpenLocation(in LogEntry entry, string file, int line)
+        {
+            var asset = UnityEditor.AssetDatabase.LoadAssetAtPath<Object>(file);
+            if (asset != null)
+            {
+                UnityEditor.AssetDatabase.OpenAsset(asset, line);
+                return;
+            }
+            string fullPath = entry.HasCaller ? entry.CallerFilePath : System.IO.Path.GetFullPath(file);
+            UnityEditorInternal.InternalEditorUtility.OpenFileAtLineExternal(fullPath, line);
+        }
+#endif
+
+        private Source SourceOf(int index, out int i)
+        {
+            if (index < Capacity)
+            {
+                i = index;
+                return logSource;
+            }
+            i = index - Capacity;
+            return unitySource;
+        }
+
+        private long SequenceOf(int index) => SourceOf(index, out int i).Sequences[i];
+
+        // "[n]" (行號)
+        private static string CountText(int count)
+        {
+            if (count >= countTexts.Length) return "[" + count + "]";
+            return countTexts[count] ??= "[" + count + "]";
+        }
+
+        // "n" (合併次數)
+        private static string CountNumberText(int count)
+        {
+            if (count >= countNumberTexts.Length) return count.ToString();
+            return countNumberTexts[count] ??= count.ToString();
         }
 
         // 第一次點擊進入清除狀態 (黃色), 清除狀態下再點才清除 (按住時紅色, 放開後恢復原色);
@@ -366,6 +626,14 @@ namespace Torben
         // 有新訊息時只組新進來的字串; 顏色改變時全部重組; 篩選條件或內容改變時重算可見清單
         private void Refresh()
         {
+            // 在快照更新前套用, 列的索引才會對應到上次畫出的內容
+            bool expandChanged = pendingToggleRow >= 0;
+            if (expandChanged)
+            {
+                ToggleRow(pendingToggleRow);
+                pendingToggleRow = -1;
+            }
+
             bool restyle = seenStyleVersion != styleVersion;
             // 用 | 而非 ||, 兩份紀錄都要更新
             bool linesAdded = logSource.Refresh(history, restyle, out bool logChanged)
@@ -377,29 +645,93 @@ namespace Torben
             {
                 RebuildVisible();
                 seenFilterVersion = filterVersion;
+                expandChanged = true;
             }
+            if (expandChanged) UpdateRowExpanded();
+            drawTime = showTime;
+            drawLocation = showLocation;
 
             if (linesAdded && autoScroll) scroll.y = float.MaxValue;
         }
 
-        // 依流水號合併兩份紀錄 (各自已是舊到新), 再套用來源、等級與搜尋篩選
+        // 展開: 記下這一列的流水號. 收合: 合併時同一組每次出現的流水號都移除
+        private void ToggleRow(int row)
+        {
+            if (row >= visibleCount) return;
+            int index = visible[row];
+            if (!rowExpanded[row])
+            {
+                expanded.Add(SequenceOf(index));
+                return;
+            }
+            for (int k = FirstToWalk(index); k >= 0; k = rowsCollapsed ? previousOccurrence[k] : -1)
+                expanded.Remove(SequenceOf(k));
+        }
+
+        // 合併時, 同一組任何一次出現被展開就算展開
+        private void UpdateRowExpanded()
+        {
+            for (int row = 0; row < visibleCount; row++)
+            {
+                bool isExpanded = false;
+                for (int k = FirstToWalk(visible[row]); k >= 0 && !isExpanded; k = rowsCollapsed ? previousOccurrence[k] : -1)
+                    isExpanded = expanded.Contains(SequenceOf(k));
+                rowExpanded[row] = isExpanded;
+            }
+        }
+
+        // 走訪同一組每次出現的起點: 合併時從最後一次往前, 否則只有自己
+        private int FirstToWalk(int index) => rowsCollapsed ? groupLast[groupOf[index]] : index;
+
+        // 依流水號合併兩份紀錄 (各自已是舊到新), 再套用來源、等級與搜尋篩選.
+        // 合併相同訊息時, 每組只留第一次出現的那一列 (同 Unity Console), 並以 previousOccurrence 串起同組的每一次.
+        // 行號為不合併時的順序, 合併後的列沿用第一次出現的行號
         private void RebuildVisible()
         {
             visibleCount = 0;
+            rowsCollapsed = collapse;
+            groupIds.Clear();
+            int groupTotal = 0;
+            int orderCount = 0;
+            int number = 0;
             int logCount = showLogMessages ? logSource.Count : 0;
             int unityCount = showUnityMessages ? unitySource.Count : 0;
             int i = 0, j = 0;
             while (i < logCount || j < unityCount)
             {
-                if (j >= unityCount || (i < logCount && logSource.Sequences[i] < unitySource.Sequences[j]))
+                int index = j >= unityCount || (i < logCount && logSource.Sequences[i] < unitySource.Sequences[j])
+                    ? i++
+                    : Capacity + j++;
+                var source = SourceOf(index, out int n);
+                if (!IsVisible(source.Snapshot[n])) continue;
+                numberOf[index] = ++number;
+                if (!rowsCollapsed)
                 {
-                    if (IsVisible(logSource.Snapshot[i])) visible[visibleCount++] = i;
-                    i++;
+                    visible[visibleCount++] = index;
+                    continue;
                 }
-                else
+
+                var key = new GroupKey(source.Snapshot[n]);
+                if (!groupIds.TryGetValue(key, out int group))
                 {
-                    if (IsVisible(unitySource.Snapshot[j])) visible[visibleCount++] = Capacity + j;
-                    j++;
+                    group = groupTotal++;
+                    groupIds.Add(key, group);
+                    groupCount[group] = 0;
+                    groupLast[group] = -1;
+                }
+                groupOf[index] = group;
+                previousOccurrence[index] = groupLast[group];
+                groupLast[group] = index;
+                groupCount[group]++;
+                order[orderCount++] = index;
+            }
+
+            if (rowsCollapsed)
+            {
+                for (int n = 0; n < orderCount; n++)
+                {
+                    int index = order[n];
+                    if (previousOccurrence[index] < 0) visible[visibleCount++] = index;
                 }
             }
         }
@@ -445,6 +777,11 @@ namespace Torben
             public readonly LogEntry[] Snapshot = new LogEntry[Capacity];
             public readonly long[] Sequences = new long[Capacity];
             public readonly string[] Lines = new string[Capacity];
+            // 第二行用的快取, 第一次顯示時才組; null 為尚未計算
+            public readonly string[] Times = new string[Capacity];
+            public readonly string[] Locations = new string[Capacity];      // "路徑:行號"; 空字串為沒有位置
+            public readonly string[] LocationFiles = new string[Capacity];
+            public readonly int[] LocationLines = new int[Capacity];
             public int Count;
             private int seenVersion;
             private bool hasSnapshot;
@@ -463,14 +800,23 @@ namespace Torben
                 if (!hasSnapshot || restyle || added < 0 || added >= Count)
                 {
                     for (int i = 0; i < Count; i++) Lines[i] = Format(Snapshot[i]);
+                    ClearDetails(0);
                 }
                 else
                 {
                     // 舊字串往前移, 只組新進來的
                     int overlap = Count - added;
                     int shiftFrom = oldCount - overlap;
-                    if (shiftFrom > 0) System.Array.Copy(Lines, shiftFrom, Lines, 0, overlap);
+                    if (shiftFrom > 0)
+                    {
+                        System.Array.Copy(Lines, shiftFrom, Lines, 0, overlap);
+                        System.Array.Copy(Times, shiftFrom, Times, 0, overlap);
+                        System.Array.Copy(Locations, shiftFrom, Locations, 0, overlap);
+                        System.Array.Copy(LocationFiles, shiftFrom, LocationFiles, 0, overlap);
+                        System.Array.Copy(LocationLines, shiftFrom, LocationLines, 0, overlap);
+                    }
                     for (int i = overlap; i < Count; i++) Lines[i] = Format(Snapshot[i]);
+                    ClearDetails(overlap);
                 }
 
                 bool linesAdded = added != 0 || !hasSnapshot;
@@ -478,6 +824,87 @@ namespace Torben
                 seenVersion = version;
                 changed = true;
                 return linesAdded;
+            }
+
+            // 時間: "(HH:mm:ss.ff)"; 沒有時間時為空字串
+            public string GetTime(int i)
+            {
+                var text = Times[i];
+                if (text != null) return text;
+                var time = Snapshot[i].Time;
+                text = time == default ? string.Empty : "(" + LogText.FormatTime(time) + ")";
+                Times[i] = text;
+                return text;
+            }
+
+            // 位置: Log 訊息用呼叫端資訊; 沒有時 (Unity 訊息) 從堆疊文字找第一個有原始碼位置的框架
+            public string GetLocation(int i, string projectRoot)
+            {
+                var text = Locations[i];
+                if (text != null) return text;
+                ref readonly var entry = ref Snapshot[i];
+                string file = null;
+                int line = 0;
+                if (entry.HasCaller)
+                {
+                    file = LogText.ToDisplayPath(entry.CallerFilePath, projectRoot);
+                    line = entry.CallerLineNumber;
+                }
+                else if (entry.StackTrace != null && LogText.TryParseUnityLocation(entry.StackTrace.Text, out string path, out line))
+                {
+                    file = LogText.ToDisplayPath(path, projectRoot);
+                }
+                text = file == null ? string.Empty : file + ":" + line;
+                Locations[i] = text;
+                LocationFiles[i] = file;
+                LocationLines[i] = line;
+                return text;
+            }
+
+            private void ClearDetails(int from)
+            {
+                int length = Capacity - from;
+                System.Array.Clear(Times, from, length);
+                System.Array.Clear(Locations, from, length);
+                System.Array.Clear(LocationFiles, from, length);
+            }
+        }
+
+        // 合併相同訊息的比對條件: 等級、分類 (同一個實例)、內容、呼叫端檔案與行號
+        private readonly struct GroupKey : System.IEquatable<GroupKey>
+        {
+            private readonly LogLevel level;
+            private readonly LogCategory category;
+            private readonly string message;
+            private readonly string file;
+            private readonly int line;
+
+            public GroupKey(in LogEntry entry)
+            {
+                level = entry.Level;
+                category = entry.Category;
+                message = entry.Message;
+                file = entry.CallerFilePath;
+                line = entry.CallerLineNumber;
+            }
+
+            public bool Equals(GroupKey other) =>
+                level == other.level && line == other.line && ReferenceEquals(category, other.category)
+                && string.Equals(message, other.message) && string.Equals(file, other.file);
+
+            public override bool Equals(object obj) => obj is GroupKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = (int)level;
+                    hash = hash * 31 + (message?.GetHashCode() ?? 0);
+                    hash = hash * 31 + (file?.GetHashCode() ?? 0);
+                    hash = hash * 31 + line;
+                    hash = hash * 31 + (category?.GetHashCode() ?? 0);
+                    return hash;
+                }
             }
         }
 

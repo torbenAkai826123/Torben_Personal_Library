@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Torben
 {
     // Call Log facade.
@@ -64,123 +66,192 @@ namespace Torben
         public static bool IsEnabled(LogLevel level)
             => isPrintLog && sinks.Length > 0 && (level != LogLevel.Debug || isDebugLog);
 
-        public static void Information(string message, LogCategory category = default(LogCategory))
-            => SinkLog(message, category, LogLevel.Normal);
-        public static void Warning(string message, LogCategory category = default(LogCategory))
-            => SinkLog(message, category, LogLevel.Warning);
-        public static void Error(string message, LogCategory category = default(LogCategory))
-            => SinkLog(message, category, LogLevel.Error);
-        public static void Debug(string message, LogCategory category = default(LogCategory))
-            => SinkLog(message, category, LogLevel.Debug);
+        // 擷取堆疊追蹤的等級 (以 1 << (int)level 為位元). 預設只有 Error
+        private static int stackTraceLevels = 1 << (int)LogLevel.Error;
+
+        /// <summary>某個等級的訊息是否擷取堆疊追蹤 (存在 LogEntry.StackTrace). 預設只有 Error 開啟.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static bool IsStackTraceEnabled(LogLevel level) => (stackTraceLevels & LevelBit(level)) != 0;
+
+        /// <summary>
+        /// 設定某個等級的訊息是否擷取堆疊追蹤. 隨時可改, 只影響之後寫入的訊息.
+        /// 擷取有額外成本 (每次配置), 建議只開在少量出現的等級.
+        /// </summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static void SetStackTraceEnabled(LogLevel level, bool isEnabled)
+        {
+            if (isEnabled) stackTraceLevels |= LevelBit(level);
+            else stackTraceLevels &= ~LevelBit(level);
+        }
+
+        private static int LevelBit(LogLevel level)
+        {
+            int index = (int)level;
+            return index >= 0 && index < 32 ? 1 << index : 0;
+        }
+
+        // 呼叫端參數 (callerMemberName / callerFilePath / callerLineNumber) 由編譯器在呼叫處填入, 不要自己傳.
+        // 這些值是編譯期常數, 不會在執行時配置. 前面的 LogArgsEnd 讓多傳的參數變成編譯錯誤, 而不是被當成呼叫端資訊.
+
+        /// <summary>寫入 Normal 等級的訊息; 呼叫端位置由編譯器自動填入.</summary>
+        /// <remarks>配置: 關閉時零配置; 開啟時零配置 (該等級開啟堆疊追蹤時每次呼叫配置).</remarks>
+        public static void Information(string message, LogCategory category = default(LogCategory),
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => SinkLog(message, category, LogLevel.Normal, callerMemberName, callerFilePath, callerLineNumber);
+        /// <summary>寫入 Warning 等級的訊息; 呼叫端位置由編譯器自動填入.</summary>
+        /// <remarks>配置: 關閉時零配置; 開啟時零配置 (該等級開啟堆疊追蹤時每次呼叫配置).</remarks>
+        public static void Warning(string message, LogCategory category = default(LogCategory),
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => SinkLog(message, category, LogLevel.Warning, callerMemberName, callerFilePath, callerLineNumber);
+        /// <summary>寫入 Error 等級的訊息; 呼叫端位置由編譯器自動填入.</summary>
+        /// <remarks>配置: 關閉時零配置; 開啟時零配置 (該等級開啟堆疊追蹤時每次呼叫配置).</remarks>
+        public static void Error(string message, LogCategory category = default(LogCategory),
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => SinkLog(message, category, LogLevel.Error, callerMemberName, callerFilePath, callerLineNumber);
+        /// <summary>寫入 Debug 等級的訊息; 呼叫端位置由編譯器自動填入.</summary>
+        /// <remarks>配置: 關閉時零配置; 開啟時零配置 (該等級開啟堆疊追蹤時每次呼叫配置).</remarks>
+        public static void Debug(string message, LogCategory category = default(LogCategory),
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => SinkLog(message, category, LogLevel.Debug, callerMemberName, callerFilePath, callerLineNumber);
 
         // ---- InformationFormat: 開啟時才以 string.Format 組字串; 關閉時零配置 ----
 
         /// <summary>Information 等級的格式化訊息; 只有 IsEnabled(LogLevel.Normal) 時才組字串.</summary>
         /// <remarks>配置: 關閉時零配置; 開啟時每次呼叫配置 (格式化字串, 值型別參數裝箱).</remarks>
-        public static void InformationFormat<T1>(string format, T1 arg1)
-            => WriteFormat(LogLevel.Normal, null, format, arg1);
-        /// <inheritdoc cref="InformationFormat{T1}(string, T1)"/>
-        public static void InformationFormat<T1, T2>(string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Normal, null, format, arg1, arg2);
-        /// <inheritdoc cref="InformationFormat{T1}(string, T1)"/>
-        public static void InformationFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Normal, null, format, arg1, arg2, arg3);
-        /// <inheritdoc cref="InformationFormat{T1}(string, T1)"/>
-        public static void InformationFormat<T1>(LogCategory category, string format, T1 arg1)
-            => WriteFormat(LogLevel.Normal, category, format, arg1);
-        /// <inheritdoc cref="InformationFormat{T1}(string, T1)"/>
-        public static void InformationFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Normal, category, format, arg1, arg2);
-        /// <inheritdoc cref="InformationFormat{T1}(string, T1)"/>
-        public static void InformationFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Normal, category, format, arg1, arg2, arg3);
+        public static void InformationFormat<T1>(string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Normal, null, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="InformationFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void InformationFormat<T1, T2>(string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Normal, null, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="InformationFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void InformationFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Normal, null, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="InformationFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void InformationFormat<T1>(LogCategory category, string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Normal, category, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="InformationFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void InformationFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Normal, category, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="InformationFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void InformationFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Normal, category, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
 
         // ---- WarningFormat: 開啟時才以 string.Format 組字串; 關閉時零配置 ----
 
         /// <summary>Warning 等級的格式化訊息; 只有 IsEnabled(LogLevel.Warning) 時才組字串.</summary>
         /// <remarks>配置: 關閉時零配置; 開啟時每次呼叫配置 (格式化字串, 值型別參數裝箱).</remarks>
-        public static void WarningFormat<T1>(string format, T1 arg1)
-            => WriteFormat(LogLevel.Warning, null, format, arg1);
-        /// <inheritdoc cref="WarningFormat{T1}(string, T1)"/>
-        public static void WarningFormat<T1, T2>(string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Warning, null, format, arg1, arg2);
-        /// <inheritdoc cref="WarningFormat{T1}(string, T1)"/>
-        public static void WarningFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Warning, null, format, arg1, arg2, arg3);
-        /// <inheritdoc cref="WarningFormat{T1}(string, T1)"/>
-        public static void WarningFormat<T1>(LogCategory category, string format, T1 arg1)
-            => WriteFormat(LogLevel.Warning, category, format, arg1);
-        /// <inheritdoc cref="WarningFormat{T1}(string, T1)"/>
-        public static void WarningFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Warning, category, format, arg1, arg2);
-        /// <inheritdoc cref="WarningFormat{T1}(string, T1)"/>
-        public static void WarningFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Warning, category, format, arg1, arg2, arg3);
+        public static void WarningFormat<T1>(string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Warning, null, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="WarningFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void WarningFormat<T1, T2>(string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Warning, null, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="WarningFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void WarningFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Warning, null, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="WarningFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void WarningFormat<T1>(LogCategory category, string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Warning, category, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="WarningFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void WarningFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Warning, category, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="WarningFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void WarningFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Warning, category, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
 
         // ---- ErrorFormat: 開啟時才以 string.Format 組字串; 關閉時零配置 ----
 
         /// <summary>Error 等級的格式化訊息; 只有 IsEnabled(LogLevel.Error) 時才組字串.</summary>
         /// <remarks>配置: 關閉時零配置; 開啟時每次呼叫配置 (格式化字串, 值型別參數裝箱).</remarks>
-        public static void ErrorFormat<T1>(string format, T1 arg1)
-            => WriteFormat(LogLevel.Error, null, format, arg1);
-        /// <inheritdoc cref="ErrorFormat{T1}(string, T1)"/>
-        public static void ErrorFormat<T1, T2>(string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Error, null, format, arg1, arg2);
-        /// <inheritdoc cref="ErrorFormat{T1}(string, T1)"/>
-        public static void ErrorFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Error, null, format, arg1, arg2, arg3);
-        /// <inheritdoc cref="ErrorFormat{T1}(string, T1)"/>
-        public static void ErrorFormat<T1>(LogCategory category, string format, T1 arg1)
-            => WriteFormat(LogLevel.Error, category, format, arg1);
-        /// <inheritdoc cref="ErrorFormat{T1}(string, T1)"/>
-        public static void ErrorFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Error, category, format, arg1, arg2);
-        /// <inheritdoc cref="ErrorFormat{T1}(string, T1)"/>
-        public static void ErrorFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Error, category, format, arg1, arg2, arg3);
+        public static void ErrorFormat<T1>(string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Error, null, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="ErrorFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void ErrorFormat<T1, T2>(string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Error, null, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="ErrorFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void ErrorFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Error, null, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="ErrorFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void ErrorFormat<T1>(LogCategory category, string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Error, category, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="ErrorFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void ErrorFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Error, category, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="ErrorFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void ErrorFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Error, category, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
 
         // ---- DebugFormat: 開啟時才以 string.Format 組字串; 關閉時零配置 ----
 
         /// <summary>Debug 等級的格式化訊息; 只有 IsEnabled(LogLevel.Debug) 時才組字串.</summary>
         /// <remarks>配置: 關閉時零配置; 開啟時每次呼叫配置 (格式化字串, 值型別參數裝箱).</remarks>
-        public static void DebugFormat<T1>(string format, T1 arg1)
-            => WriteFormat(LogLevel.Debug, null, format, arg1);
-        /// <inheritdoc cref="DebugFormat{T1}(string, T1)"/>
-        public static void DebugFormat<T1, T2>(string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Debug, null, format, arg1, arg2);
-        /// <inheritdoc cref="DebugFormat{T1}(string, T1)"/>
-        public static void DebugFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Debug, null, format, arg1, arg2, arg3);
-        /// <inheritdoc cref="DebugFormat{T1}(string, T1)"/>
-        public static void DebugFormat<T1>(LogCategory category, string format, T1 arg1)
-            => WriteFormat(LogLevel.Debug, category, format, arg1);
-        /// <inheritdoc cref="DebugFormat{T1}(string, T1)"/>
-        public static void DebugFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2)
-            => WriteFormat(LogLevel.Debug, category, format, arg1, arg2);
-        /// <inheritdoc cref="DebugFormat{T1}(string, T1)"/>
-        public static void DebugFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3)
-            => WriteFormat(LogLevel.Debug, category, format, arg1, arg2, arg3);
+        public static void DebugFormat<T1>(string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Debug, null, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="DebugFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void DebugFormat<T1, T2>(string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Debug, null, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="DebugFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void DebugFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Debug, null, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="DebugFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void DebugFormat<T1>(LogCategory category, string format, T1 arg1,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Debug, category, format, arg1, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="DebugFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void DebugFormat<T1, T2>(LogCategory category, string format, T1 arg1, T2 arg2,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Debug, category, format, arg1, arg2, callerMemberName, callerFilePath, callerLineNumber);
+        /// <inheritdoc cref="DebugFormat{T1}(string, T1, LogArgsEnd, string, string, int)"/>
+        public static void DebugFormat<T1, T2, T3>(LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3,
+            LogArgsEnd argsEnd = default, [CallerMemberName] string callerMemberName = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0)
+            => WriteFormat(LogLevel.Debug, category, format, arg1, arg2, arg3, callerMemberName, callerFilePath, callerLineNumber);
 
         // 參數以泛型傳入, 關閉時不會裝箱; 開啟時才交給 string.Format
-        private static void WriteFormat<T1>(LogLevel level, LogCategory category, string format, T1 arg1)
+        private static void WriteFormat<T1>(LogLevel level, LogCategory category, string format, T1 arg1,
+            string callerMemberName, string callerFilePath, int callerLineNumber)
         {
-            if (IsEnabled(level)) SinkLog(string.Format(format, arg1), category, level);
+            if (IsEnabled(level)) SinkLog(string.Format(format, arg1), category, level, callerMemberName, callerFilePath, callerLineNumber);
         }
-        private static void WriteFormat<T1, T2>(LogLevel level, LogCategory category, string format, T1 arg1, T2 arg2)
+        private static void WriteFormat<T1, T2>(LogLevel level, LogCategory category, string format, T1 arg1, T2 arg2,
+            string callerMemberName, string callerFilePath, int callerLineNumber)
         {
-            if (IsEnabled(level)) SinkLog(string.Format(format, arg1, arg2), category, level);
+            if (IsEnabled(level)) SinkLog(string.Format(format, arg1, arg2), category, level, callerMemberName, callerFilePath, callerLineNumber);
         }
-        private static void WriteFormat<T1, T2, T3>(LogLevel level, LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3)
+        private static void WriteFormat<T1, T2, T3>(LogLevel level, LogCategory category, string format, T1 arg1, T2 arg2, T3 arg3,
+            string callerMemberName, string callerFilePath, int callerLineNumber)
         {
-            if (IsEnabled(level)) SinkLog(string.Format(format, arg1, arg2, arg3), category, level);
+            if (IsEnabled(level)) SinkLog(string.Format(format, arg1, arg2, arg3), category, level, callerMemberName, callerFilePath, callerLineNumber);
         }
 
         // Internal method to send log entries to the sink.
-        private static void SinkLog(string message, LogCategory category, LogLevel level)
+        private static void SinkLog(string message, LogCategory category, LogLevel level,
+            string callerMemberName, string callerFilePath, int callerLineNumber)
         {
             if (!IsEnabled(level)) return; // 總開關關閉、沒有 sink, 或 Debug 訊息未開啟時都不輸出
             if (category == null) category = LogCategoryEmpty.None;
-            var entry = new LogEntry(level, category, message);
+            var stackTrace = IsStackTraceEnabled(level) ? LogStackTrace.Capture() : null;
+            var entry = new LogEntry(level, category, message, System.DateTime.UtcNow,
+                callerFilePath, callerMemberName, callerLineNumber, stackTrace);
             var current = sinks;
             for (int i = 0; i < current.Length; i++)
                 current[i].Write(entry);
@@ -194,6 +265,7 @@ namespace Torben
      2. Log 類別提供了四個靜態方法：Information、Warning、Error 和 Debug，用於記錄不同級別的日誌。
      3. 每個方法都接受一個消息字符串和一個可選的 LogCategory 參數。如果未提供 LogCategory，將使用 LogCategoryEmpty.None 作為默認值。
      4. 需要組字串時，用 XxxFormat (例如 Log.DebugFormat("hp={0}", hp)) 或先檢查 Log.IsEnabled(level)，關閉時不會配置。
+     5. 每筆 LogEntry 會記錄 UTC 時間與呼叫端位置 (編譯器自動填入)；Log.SetStackTraceEnabled 開啟的等級另外擷取堆疊追蹤 (預設只有 Error)。
 
     # 使用說明
      1. 在 Unity 中，您可以在任何地方調用 Log.Information、Log.Warning 或 Log.Error 方法來記錄日誌。
