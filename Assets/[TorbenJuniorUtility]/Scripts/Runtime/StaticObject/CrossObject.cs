@@ -46,7 +46,7 @@ namespace Torben
             else
             {
                 string status = "Instance: " + (instance != null ? "Exists" : "Null") + ", IsReady: " + IsReady;
-                Debug.Log(status);
+                Debug.Log("[LogOff] " + status);
             }
         } 
 
