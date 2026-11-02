@@ -23,6 +23,9 @@ public sealed class DebugWindowTests
     {
         DebugLogs.isGUILog = false;
         DebugLogs.isConsoleWithGUI = false;
+        DebugLogs.isUnityLog = true;
+        DebugWindow.ShowLogMessages = true;
+        DebugWindow.ShowUnityMessages = true;
         DebugWindow.ResetPosition();
         DebugWindow.SearchText = string.Empty;
         foreach (LogLevel level in System.Enum.GetValues(typeof(LogLevel)))
@@ -162,5 +165,92 @@ public sealed class DebugWindowTests
         Assert.That(DebugWindow.Size.x, Is.EqualTo(Screen.width / s * 0.5f).Within(0.01f));
         Assert.That(DebugWindow.Size.y, Is.EqualTo(Screen.height / s * 0.5f).Within(0.01f));
         DebugWindow.Size = savedSize;
+    }
+
+    // 取出最新一筆紀錄
+    private static LogEntry Latest(LogHistorySink history)
+    {
+        var entries = new LogEntry[200];
+        int count = history.CopyTo(entries);
+        return entries[count - 1];
+    }
+
+    [Test]
+    public void UnityLog_DebugLog_RecordedInUnityHistory()
+    {
+        int before = DebugWindow.UnityHistory.Version;
+        int logBefore = DebugWindow.History.Version;
+
+        Debug.LogWarning("engine warning");
+        LogAssert.Expect(LogType.Warning, "engine warning");
+
+        Assert.That(DebugWindow.UnityHistory.Version, Is.EqualTo(before + 1));
+        Assert.That(DebugWindow.History.Version, Is.EqualTo(logBefore));
+        var entry = Latest(DebugWindow.UnityHistory);
+        Assert.That(entry.Message, Is.EqualTo("engine warning"));
+        Assert.That(entry.Level, Is.EqualTo(LogLevel.Warning));
+        Assert.That(entry.Category, Is.SameAs(UnityLogCategory.Instance));
+        Assert.That(entry.Category.Tag, Is.EqualTo("[Unity]"));
+    }
+
+    [Test]
+    public void UnityLog_OwnLogToConsole_NotRecordedAsUnity()
+    {
+        int before = DebugWindow.UnityHistory.Version;
+
+        Log.Information("mine");
+        LogAssert.Expect(LogType.Log, "mine");
+
+        Assert.That(DebugWindow.UnityHistory.Version, Is.EqualTo(before));
+    }
+
+    [Test]
+    public void UnityLog_Disabled_NotRecorded()
+    {
+        DebugLogs.isUnityLog = false;
+        int before = DebugWindow.UnityHistory.Version;
+
+        Debug.Log("ignored");
+        LogAssert.Expect(LogType.Log, "ignored");
+
+        Assert.That(DebugWindow.UnityHistory.Version, Is.EqualTo(before));
+    }
+
+    [Test]
+    public void UnityLog_IndependentOfPrintLog()
+    {
+        Log.isPrintLog = false;
+        int before = DebugWindow.UnityHistory.Version;
+
+        Debug.Log("engine");
+        LogAssert.Expect(LogType.Log, "engine");
+
+        Assert.That(DebugWindow.UnityHistory.Version, Is.EqualTo(before + 1));
+    }
+
+    [Test]
+    public void HistoryClear_KeepsUnityHistory()
+    {
+        Debug.Log("keep");
+        LogAssert.Expect(LogType.Log, "keep");
+        int unityVersion = DebugWindow.UnityHistory.Version;
+
+        DebugWindow.History.Clear();
+
+        Assert.That(DebugWindow.UnityHistory.Version, Is.EqualTo(unityVersion));
+        Assert.That(Latest(DebugWindow.UnityHistory).Message, Is.EqualTo("keep"));
+    }
+
+    [Test]
+    public void SourceFilters_DefaultOnAndRoundTrip()
+    {
+        Assert.That(DebugWindow.ShowLogMessages, Is.True);
+        Assert.That(DebugWindow.ShowUnityMessages, Is.True);
+
+        DebugWindow.ShowLogMessages = false;
+        DebugWindow.ShowUnityMessages = false;
+
+        Assert.That(DebugWindow.ShowLogMessages, Is.False);
+        Assert.That(DebugWindow.ShowUnityMessages, Is.False);
     }
 }

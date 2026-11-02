@@ -10,9 +10,13 @@ Log.Information / Warning / Error / Debug   (Core, 純 C#)
         ▼
    sink 清單 (copy-on-write 陣列)
         ├─ DebugLogs         → Unity Console        (Runtime)
-        └─ LogHistorySink    → 最近 200 筆歷史紀錄  (Core)
+        └─ LogHistorySink    → Log 歷史紀錄 200 筆  (Core) ── DebugWindow.History
                                    ▲
-                              DebugWindow 讀取並繪製 (Runtime, IMGUI)
+                              DebugWindow 依流水號合併兩份紀錄並繪製 (Runtime, IMGUI)
+                                   ▼
+Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟時)
+        └─ DebugLogs.OnUnityLog → Unity 歷史紀錄 200 筆 ── DebugWindow.UnityHistory
+                                  (排除 DebugLogs 自己輸出到 Console 的訊息)
 ```
 
 | 檔案 | 組件 | 責任 |
@@ -21,7 +25,8 @@ Log.Information / Warning / Error / Debug   (Core, 純 C#)
 | `Scripts/Core/Logs/LogModels.cs` | Torben.Core | `LogLevel`、`ILogSink`、`LogEntry` |
 | `Scripts/Core/Logs/LogCategory.cs` | Torben.Core | 分類標籤 (`Tag`) 與標籤顏色 (`tagColorHex`) |
 | `Scripts/Core/Logs/LogHistorySink.cs` | Torben.Core | 固定容量環狀緩衝區, 保留最新的 N 筆 |
-| `Scripts/Runtime/Logs/DebugLogs.cs` | Torben.Runtime | Console 輸出; 啟動時安裝 sink; `isGUILog` 開關 |
+| `Scripts/Runtime/Logs/DebugLogs.cs` | Torben.Runtime | Console 輸出; 啟動時安裝 sink; `isGUILog` 開關; 收集 Unity 引擎訊息 |
+| `Scripts/Runtime/Logs/UnityLogCategory.cs` | Torben.Runtime | Unity 引擎訊息的分類 (`[Unity]`) |
 | `Scripts/Runtime/Logs/DebugWindow.cs` | Torben.Runtime | 畫面視窗 (篩選、搜尋、上色、拖曳、縮放) |
 | `Scripts/Runtime/StaticObject/CrossObject.cs` | Torben.Runtime | 跨場景物件; DebugWindow 掛在它上面 |
 
@@ -35,14 +40,24 @@ Log.Information / Warning / Error / Debug   (Core, 純 C#)
 | `Log.isDebugLog` | `false` | 只管 `LogLevel.Debug`。關閉時 Debug 訊息不會送到任何 sink |
 | `DebugLogs.isGUILog` | `false` | 開啟: 顯示畫面視窗, 並停止輸出到 Console。關閉: 隱藏視窗, 恢復 Console |
 | `DebugLogs.isConsoleWithGUI` | `false` | `isGUILog` 開啟時仍同時輸出到 Console |
+| `DebugLogs.isUnityLog` | `true` | 收集 Unity 引擎訊息到 `DebugWindow.UnityHistory`。**不受 `isPrintLog` 影響**; 關閉時取消訂閱, 期間的訊息不補記 |
 
 歷史紀錄不受 `isGUILog` 影響: 只要訊息通過前兩個開關就會被記錄, 所以視窗晚點開啟也看得到之前的訊息。
+
+### Unity 引擎訊息
+
+- 指沒有經過 `Torben.Log`、直接寫進 Console 的訊息: 未捕捉的例外、引擎警告、第三方或舊程式直接呼叫的 `UnityEngine.Debug.Log`。
+- 以 `Application.logMessageReceivedThreaded` 收集, 可能在任何執行緒觸發。等級對應: `Warning` → Warning; `Error`、`Assert`、`Exception` → Error; 其他 → Normal。分類固定為 `UnityLogCategory.Instance` (標籤 `[Unity]`, 可改 `tagColorHex`)。
+- `DebugLogs` 自己輸出到 Console 時以執行緒旗標排除, 所以 `Torben.Log` 的訊息不會重複出現成 `[Unity]`。
+- 只存訊息本身, 不存堆疊追蹤 (stack trace)。
+- 正式版不想收集時, 在 `BeforeSceneLoad` 之後設 `DebugLogs.isUnityLog = false`; 在這之前產生的引擎訊息已被收集。
+- 離開 Play (Editor) 或程式結束時 (`Application.quitting`) 取消訂閱。
 
 ## 載入順序
 
 | 階段 | 發生的事 |
 |---|---|
-| `SubsystemRegistration` | `DebugLogs.Install`: 清空 sink, 加入 Console 與歷史紀錄兩個 sink; 重設 `isGUILog` 與 DebugWindow 的所有設定 |
+| `SubsystemRegistration` | `DebugLogs.Install`: 清空 sink, 加入 Console 與歷史紀錄兩個 sink; 重設 `isGUILog` 與 DebugWindow 的所有設定; `isUnityLog` 恢復開啟並開始收集 Unity 訊息 |
 | `BeforeSceneLoad` 之後 | 專案可以修改開關與 DebugWindow 設定 |
 | `AfterSceneLoad` | 若 `isGUILog` 已開啟, 此時才建立視窗元件 (掛在 `CrossObject` 上) |
 | 之後 | 第一次開啟 `isGUILog` 時建立視窗元件; 之後切換只改 `enabled` |
@@ -109,7 +124,9 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 
 | 成員 | 預設 | 說明 |
 |---|---|---|
-| `History` | — | 歷史紀錄 (`LogHistorySink`, 最多 200 筆) |
+| `History` | — | Log 訊息的歷史紀錄 (`LogHistorySink`, 最多 200 筆); Clear 按鈕只清這份 |
+| `UnityHistory` | — | Unity 引擎訊息的歷史紀錄 (最多 200 筆); Clear 按鈕不清 |
+| `ShowLogMessages` / `ShowUnityMessages` | `true` | 依來源篩選; 視窗上方 Log / Unity 開關同步此設定。兩個都開即顯示全部 |
 | `Size` | 600 × 180 | 視窗大小 (縮放前單位); 最小 80 × 60 |
 | `Position` | 右下角 | 視窗左上角位置; 設定後不再自動貼齊右下角, 拖曳也會更新 |
 | `ResetPosition()` | — | 恢復右下角 |
@@ -118,12 +135,14 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `Scale` | `0` | 介面縮放倍率; `0` 表示依 `Screen.height / 720` 自動計算 (最小 1 倍), 視窗佔畫面的比例固定 |
 | `SearchText` | `""` | 搜尋文字; 比對標籤與訊息, 不分大小寫 |
 | `IsLevelVisible(level)` / `SetLevelVisible(level, bool)` | 全部顯示 | 依等級篩選; 視窗上方 N / W / E / D 開關同步此設定 |
-| `History.Clear()` | — | 清空歷史紀錄; 視窗的 Clear 按鈕也是呼叫它 |
+| `History.Clear()` | — | 清空 Log 歷史紀錄; 視窗的 Clear 按鈕也是呼叫它 |
 | `GetLevelColor(level)` / `SetLevelColor(level, hex)` | Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`、Normal 無 | 訊息文字顏色; null 或空字串表示預設文字色 |
 
 ### 視窗操作
 
-- 上方一列: N / W / E / D 等級開關、`Clear`、`X`; 下方為搜尋框與捲動清單。
+- 上方一列: N / W / E / D 等級開關、Log / Unity 來源開關、`Clear`、`X`; 下方為搜尋框與捲動清單。
+- 兩份紀錄依寫入順序 (`LogHistorySink` 共用的流水號) 合併顯示; 來源、等級、搜尋三種篩選同時套用。
+- `Clear` 只清 Log 訊息, Unity 訊息保留 (避免重要的引擎錯誤一起被刪)。Unity 訊息只會因超過 200 筆被擠掉或重新進入 Play 而消失。
 - `Clear` 為兩段式確認: 第一次點擊進入清除狀態 (按鈕變黃), 再點一次才清除 (按住時紅色); 在視窗其他位置按下滑鼠即取消。
 - `X` 等同 `DebugLogs.isGUILog = false`, 一併恢復 Console 輸出。
 - 開啟視窗與拖曳結束時: 寬或高超過畫面時改為畫面該方向的一半; 自訂位置超出畫面時拉回邊緣。
@@ -131,7 +150,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 ### 繪製與效能
 
 - 只在 IMGUI 的 `Layout` 事件更新資料, 讓 `Layout` 與 `Repaint` 的控制項數量一致, 避免 `Getting control X's position...` 例外。
-- 用 `LogHistorySink.CopyTo(dest, out version)` 在同一次鎖定內取得資料與版本號; 有新訊息時只為新進來的幾筆組字串, 舊字串直接搬移。改變等級顏色時才全部重組。
+- 用 `LogHistorySink.CopyTo(dest, sequences, out version)` 在同一次鎖定內取得資料、流水號與版本號; 兩份紀錄各自只為新進來的幾筆組字串, 舊字串直接搬移。改變等級顏色時才全部重組。
 - 篩選與搜尋只在條件或內容改變時重算。
 - 隱藏時設 `enabled = false`, `OnGUI` 完全不會被呼叫。
 - GUILayout 本身每幀會有少量配置, 無法完全消除; 以除錯視窗而言可接受。
@@ -152,7 +171,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | 檔案 | 類型 | 內容 |
 |---|---|---|
 | `dotnet/Library.Tests/LogTests.cs` | dotnet | 多 sink、重複加入、移除、`HasSink`、`isDebugLog`、`isPrintLog`、`IsEnabled`、`XxxFormat` (含關閉時不格式化參數)、`SystemCategory` 標籤 |
-| `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號、`Clear`、容量小於 1 時丟例外 |
-| `Scripts/Tests/PlayMode/DebugWindowTests.cs` | PlayMode | 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置 |
+| `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號、`Clear`、容量小於 1 時丟例外、流水號遞增且跨紀錄共用 |
+| `Scripts/Tests/PlayMode/DebugWindowTests.cs` | PlayMode | 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置、Unity 訊息收集 / 不重複收自己的 Log / `isUnityLog` 關閉 / 不受 `isPrintLog` 影響、清 Log 不影響 Unity、來源篩選設定 |
 
-執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋) 需在 Play 時人工確認。
+執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋、Log / Unity 合併順序與開關) 需在 Play 時人工確認。

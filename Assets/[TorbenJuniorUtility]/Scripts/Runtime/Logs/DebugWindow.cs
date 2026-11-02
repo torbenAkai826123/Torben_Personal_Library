@@ -3,13 +3,13 @@ using UnityEngine;
 namespace Torben
 {
     /// <summary>
-    /// 在遊戲畫面上顯示最近的 Log 訊息 (IMGUI 視窗).
+    /// 在遊戲畫面上顯示最近的 Log 訊息與 Unity 引擎訊息 (IMGUI 視窗).
     /// 由 DebugLogs.isGUILog 開關; 元件掛在跨場景的 CrossObject 上, 第一次開啟時才建立.
     /// 設定 (大小、位置、篩選、顏色...) 都是靜態的, 視窗建立前就可以先設定.
     /// </summary>
     public class DebugWindow : MonoBehaviour
     {
-        private const int Capacity = 200;
+        private const int Capacity = 200;   // Log 與 Unity 訊息各保留的筆數
         private const int WindowId = 0x4C4F47;
         private const float Margin = 10f;
         private const float TitleBarHeight = 18f;
@@ -20,6 +20,7 @@ namespace Torben
 
         // ---- 靜態狀態 ----
         private static LogHistorySink history;
+        private static LogHistorySink unityHistory;
         private static DebugWindow current;
         private static bool wantVisible;
         private static bool sceneLoaded;    // AfterSceneLoad 之前不建立 GameObject
@@ -33,24 +34,25 @@ namespace Torben
         private static float scale;             // 0 = 依畫面高度自動
         private static string searchText;
         private static bool[] levelVisible;
+        private static bool showLogMessages;
+        private static bool showUnityMessages;
         private static string[] levelColors;
         private static int filterVersion;       // 篩選條件改變時遞增
         private static int styleVersion;        // 顏色改變時遞增 (需要重組字串)
 
         // ---- 元件狀態 ----
-        private readonly LogEntry[] snapshot = new LogEntry[Capacity];
-        private readonly string[] lines = new string[Capacity];
-        private readonly int[] visible = new int[Capacity];
-        private int count;
+        private readonly Source logSource = new Source();
+        private readonly Source unitySource = new Source();
+        private readonly int[] visible = new int[Capacity * 2]; // 小於 Capacity 為 logSource 的索引, 否則為 unitySource 的索引 + Capacity
         private int visibleCount;
-        private int seenVersion;
         private int seenFilterVersion = -1;
         private int seenStyleVersion = -1;
-        private bool hasSnapshot;
         private Vector2 scroll;
         private GUI.WindowFunction drawWindow;
         private GUIStyle lineStyle;
         private GUIContent[] levelToggleLabels;
+        private GUIContent logSourceLabel;
+        private GUIContent unitySourceLabel;
         private GUIContent clearLabel;
         private GUIContent closeLabel;
         private bool dragging;
@@ -62,9 +64,13 @@ namespace Torben
 
         // ==== 公開設定 ====
 
-        /// <summary>最近訊息的歷史紀錄 (最多 200 筆). 啟動時建立, 視窗未開啟也會持續記錄.</summary>
+        /// <summary>Log 訊息的歷史紀錄 (最多 200 筆). 啟動時建立, 視窗未開啟也會持續記錄. 視窗的 Clear 按鈕只清除這份紀錄.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static LogHistorySink History => history;
+
+        /// <summary>Unity 引擎訊息的歷史紀錄 (最多 200 筆), 由 DebugLogs.isUnityLog 控制是否收集. 視窗的 Clear 按鈕不會清除.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static LogHistorySink UnityHistory => unityHistory;
 
         /// <summary>視窗大小 (縮放前的單位). 預設 600 x 180, 最小 80 x 60.
         /// 開啟視窗時, 寬或高超過畫面的那一邊會改為畫面該方向的一半.</summary>
@@ -127,6 +133,32 @@ namespace Torben
             }
         }
 
+        /// <summary>是否顯示 Log 訊息 (經過 Torben.Log 的訊息). 預設開啟; 視窗上方 Log 開關同步此設定.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static bool ShowLogMessages
+        {
+            get => showLogMessages;
+            set
+            {
+                if (showLogMessages == value) return;
+                showLogMessages = value;
+                filterVersion++;
+            }
+        }
+
+        /// <summary>是否顯示 Unity 引擎訊息. 預設開啟; 視窗上方 Unity 開關同步此設定.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static bool ShowUnityMessages
+        {
+            get => showUnityMessages;
+            set
+            {
+                if (showUnityMessages == value) return;
+                showUnityMessages = value;
+                filterVersion++;
+            }
+        }
+
         /// <summary>是否顯示某個等級的訊息. 預設全部顯示.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool IsLevelVisible(LogLevel level) => levelVisible[LevelIndex(level)];
@@ -155,10 +187,11 @@ namespace Torben
 
         // ==== 安裝與顯示 (由 DebugLogs 呼叫) ====
 
-        // 重設所有靜態狀態並建立新的歷史紀錄. 在 SubsystemRegistration 階段由 DebugLogs.Install 呼叫.
+        // 重設所有靜態狀態並建立新的歷史紀錄 (Log 與 Unity 各一份). 在 SubsystemRegistration 階段由 DebugLogs.Install 呼叫.
         internal static LogHistorySink ResetStatics()
         {
             history = new LogHistorySink(Capacity);
+            unityHistory = new LogHistorySink(Capacity);
             current = null;
             wantVisible = false;
             sceneLoaded = false;
@@ -172,6 +205,8 @@ namespace Torben
             searchText = string.Empty;
             levelVisible = new bool[levelCount];
             for (int i = 0; i < levelCount; i++) levelVisible[i] = true;
+            showLogMessages = true;
+            showUnityMessages = true;
             levelColors = new string[levelCount];
             levelColors[(int)LogLevel.Warning] = "#FFD54F";
             levelColors[(int)LogLevel.Error] = "#FF6B6B";
@@ -222,7 +257,9 @@ namespace Torben
             levelToggleLabels = new GUIContent[levelCount];
             for (int i = 0; i < levelCount; i++)
                 levelToggleLabels[i] = new GUIContent(levelNames[i].Substring(0, 1), levelNames[i]);
-            clearLabel = new GUIContent("Clear", "Clear messages");
+            logSourceLabel = new GUIContent("Log", "Log messages");
+            unitySourceLabel = new GUIContent("Unity", "Unity engine messages");
+            clearLabel = new GUIContent("Clear", "Clear Log messages (Unity messages are kept)");
             closeLabel = new GUIContent("X", "Close");
         }
 
@@ -234,7 +271,7 @@ namespace Torben
 
         private void OnGUI()
         {
-            if (history == null) return;
+            if (history == null || unityHistory == null) return;
             if (lineStyle == null)
                 lineStyle = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true, margin = new RectOffset(2, 2, 0, 0) };
 
@@ -276,6 +313,8 @@ namespace Torben
                 bool isOn = GUILayout.Toggle(levelVisible[i], levelToggleLabels[i]);
                 if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
             }
+            ShowLogMessages = GUILayout.Toggle(showLogMessages, logSourceLabel);
+            ShowUnityMessages = GUILayout.Toggle(showUnityMessages, unitySourceLabel);
             GUILayout.FlexibleSpace();
             DrawClearButton(isMouseDown, mouseDownPosition);
             if (GUILayout.Button(closeLabel)) DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
@@ -285,7 +324,10 @@ namespace Torben
 
             scroll = GUILayout.BeginScrollView(scroll);
             for (int i = 0; i < visibleCount; i++)
-                GUILayout.Label(lines[visible[i]], lineStyle);
+            {
+                int index = visible[i];
+                GUILayout.Label(index < Capacity ? logSource.Lines[index] : unitySource.Lines[index - Capacity], lineStyle);
+            }
             GUILayout.EndScrollView();
 
             if (draggable) GUI.DragWindow(new Rect(0f, 0f, 10000f, TitleBarHeight));
@@ -312,7 +354,7 @@ namespace Torben
             {
                 if (clearArmed)
                 {
-                    history.Clear();
+                    history.Clear();    // 只清 Log 訊息, Unity 訊息保留
                     scroll = Vector2.zero;
                 }
                 clearArmed = !clearArmed;
@@ -324,32 +366,12 @@ namespace Torben
         // 有新訊息時只組新進來的字串; 顏色改變時全部重組; 篩選條件或內容改變時重算可見清單
         private void Refresh()
         {
-            bool linesChanged = false;
-            if (!hasSnapshot || history.Version != seenVersion || seenStyleVersion != styleVersion)
-            {
-                int oldCount = count;
-                count = history.CopyTo(snapshot, out int version);
-                int added = unchecked(version - seenVersion);
-
-                if (!hasSnapshot || seenStyleVersion != styleVersion || added < 0 || added >= count)
-                {
-                    for (int i = 0; i < count; i++) lines[i] = Format(snapshot[i]);
-                }
-                else
-                {
-                    // 舊字串往前移, 只組新進來的
-                    int overlap = count - added;
-                    int shiftFrom = oldCount - overlap;
-                    if (shiftFrom > 0) System.Array.Copy(lines, shiftFrom, lines, 0, overlap);
-                    for (int i = overlap; i < count; i++) lines[i] = Format(snapshot[i]);
-                }
-
-                linesChanged = added != 0 || !hasSnapshot;
-                hasSnapshot = true;
-                seenVersion = version;
-                seenStyleVersion = styleVersion;
-                seenFilterVersion = -1;
-            }
+            bool restyle = seenStyleVersion != styleVersion;
+            // 用 | 而非 ||, 兩份紀錄都要更新
+            bool linesAdded = logSource.Refresh(history, restyle, out bool logChanged)
+                            | unitySource.Refresh(unityHistory, restyle, out bool unityChanged);
+            seenStyleVersion = styleVersion;
+            if (logChanged || unityChanged) seenFilterVersion = -1;
 
             if (seenFilterVersion != filterVersion)
             {
@@ -357,20 +379,36 @@ namespace Torben
                 seenFilterVersion = filterVersion;
             }
 
-            if (linesChanged && autoScroll) scroll.y = float.MaxValue;
+            if (linesAdded && autoScroll) scroll.y = float.MaxValue;
         }
 
+        // 依流水號合併兩份紀錄 (各自已是舊到新), 再套用來源、等級與搜尋篩選
         private void RebuildVisible()
         {
             visibleCount = 0;
-            bool hasSearch = searchText.Length > 0;
-            for (int i = 0; i < count; i++)
+            int logCount = showLogMessages ? logSource.Count : 0;
+            int unityCount = showUnityMessages ? unitySource.Count : 0;
+            int i = 0, j = 0;
+            while (i < logCount || j < unityCount)
             {
-                var entry = snapshot[i];
-                if (!levelVisible[LevelIndex(entry.Level)]) continue;
-                if (hasSearch && !Contains(entry.Message, searchText) && !Contains(entry.Category?.Tag, searchText)) continue;
-                visible[visibleCount++] = i;
+                if (j >= unityCount || (i < logCount && logSource.Sequences[i] < unitySource.Sequences[j]))
+                {
+                    if (IsVisible(logSource.Snapshot[i])) visible[visibleCount++] = i;
+                    i++;
+                }
+                else
+                {
+                    if (IsVisible(unitySource.Snapshot[j])) visible[visibleCount++] = Capacity + j;
+                    j++;
+                }
             }
+        }
+
+        private static bool IsVisible(in LogEntry entry)
+        {
+            if (!levelVisible[LevelIndex(entry.Level)]) return false;
+            if (searchText.Length == 0) return true;
+            return Contains(entry.Message, searchText) || Contains(entry.Category?.Tag, searchText);
         }
 
         private static string Format(in LogEntry entry)
@@ -400,6 +438,48 @@ namespace Torben
 
         private static Vector2 DefaultPosition(float s) =>
             new Vector2(Mathf.Max(0f, Screen.width / s - size.x - Margin), Mathf.Max(0f, Screen.height / s - size.y - Margin));
+
+        // 一份歷史紀錄的快照與已格式化字串
+        private sealed class Source
+        {
+            public readonly LogEntry[] Snapshot = new LogEntry[Capacity];
+            public readonly long[] Sequences = new long[Capacity];
+            public readonly string[] Lines = new string[Capacity];
+            public int Count;
+            private int seenVersion;
+            private bool hasSnapshot;
+
+            // 有新訊息時只組新進來的字串, 舊字串直接搬移; restyle 時全部重組.
+            // changed: 快照是否更新; 回傳值: 是否有新增或清除 (用於自動捲動)
+            public bool Refresh(LogHistorySink history, bool restyle, out bool changed)
+            {
+                changed = false;
+                if (hasSnapshot && history.Version == seenVersion && !restyle) return false;
+
+                int oldCount = Count;
+                Count = history.CopyTo(Snapshot, Sequences, out int version);
+                int added = unchecked(version - seenVersion);
+
+                if (!hasSnapshot || restyle || added < 0 || added >= Count)
+                {
+                    for (int i = 0; i < Count; i++) Lines[i] = Format(Snapshot[i]);
+                }
+                else
+                {
+                    // 舊字串往前移, 只組新進來的
+                    int overlap = Count - added;
+                    int shiftFrom = oldCount - overlap;
+                    if (shiftFrom > 0) System.Array.Copy(Lines, shiftFrom, Lines, 0, overlap);
+                    for (int i = overlap; i < Count; i++) Lines[i] = Format(Snapshot[i]);
+                }
+
+                bool linesAdded = added != 0 || !hasSnapshot;
+                hasSnapshot = true;
+                seenVersion = version;
+                changed = true;
+                return linesAdded;
+            }
+        }
 
         // 開啟時與拖曳結束時呼叫: 寬或高超過畫面就改為畫面該方向的一半; 位置超出畫面就拉回邊緣
         private static void FitToScreen()

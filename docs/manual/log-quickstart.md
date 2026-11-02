@@ -72,12 +72,15 @@ AddButton("GUI Status " + (DebugLogs.isGUILog ? "ON" : "OFF"),
 
 視窗開啟前的訊息也看得到 (最多保留最近 200 筆)。
 
+視窗裡除了你用 `Log` 寫的訊息，也會顯示 Unity 本身的訊息 (例外、引擎警告、直接用 `Debug.Log` 寫的訊息)，前面標著 **[Unity]**。兩種訊息各保留 200 筆，依出現順序排在一起。
+
 視窗上可以：
 
 - 用 **N / W / E / D** 切換顯示 Normal、Warning、Error、Debug。
+- 用 **Log / Unity** 切換顯示自己的訊息或 Unity 的訊息；兩個都勾就全部顯示。
 - 在搜尋框輸入文字篩選 (不分大小寫)。
 - 拖曳標題列移動視窗；放開時若超出畫面，會自動拉回畫面邊緣。
-- 按 **Clear** 清空目前所有訊息 (清掉的訊息不會再出現)。為避免誤按，需要按兩次：
+- 按 **Clear** 清空自己的訊息 (清掉的訊息不會再出現)。**[Unity] 訊息不會被清掉**，避免重要的錯誤跟著消失。為避免誤按，需要按兩次：
   - 第一次按下後按鈕變黃，進入清除狀態，訊息還不會清掉。
   - 清除狀態下再按一次才會清除 (按住時變紅，放開後恢復原色)；按住後移到按鈕外再放開則不清除。
   - 清除狀態下點視窗中其他位置即取消。
@@ -101,6 +104,15 @@ DebugWindow.SetLevelColor(LogLevel.Normal, "#FFFFFF");
 // 切換顯示訊息層級
 DebugWindow.SetLevelVisible(LogLevel.Debug, false); 
 
+// 只看 Unity 的訊息
+DebugWindow.ShowLogMessages = false;
+
+// 不收集 Unity 的訊息 (例如正式版)；在 BeforeSceneLoad 之後設定
+DebugLogs.isUnityLog = false;
+
+// 改 [Unity] 標籤的顏色
+UnityLogCategory.Instance.tagColorHex = "#B39DDB";
+
 ```
 
 ## 常見問題
@@ -113,4 +125,5 @@ DebugWindow.SetLevelVisible(LogLevel.Debug, false);
 | 啟動最初幾行沒出現 | 那時 `isPrintLog` 還沒打開，這些訊息不會補記 |
 | 設定好像沒生效 | 設定得太早被重設，改在 `BeforeSceneLoad` 之後設定 |
 | 訊息裡的 `<b>`、`<color=...>` 變成粗體或顏色 | 訊息支援 rich text 標記，Console 和畫面視窗都會解讀 |
+| 視窗裡出現沒寫過的 `[Unity]` 訊息 | 那是 Unity 本身或其他程式的訊息；不想看就取消勾選 **Unity**，不想收集就設 `DebugLogs.isUnityLog = false` |
 | `XxxFormat` 丟出 `FormatException` | `{0}` 的編號超過參數數量，或大括號沒成對 |

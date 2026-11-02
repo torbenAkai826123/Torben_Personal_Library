@@ -161,4 +161,38 @@ public class LogHistorySinkTests
     {
         Assert.That(() => new LogHistorySink(capacity), Throws.TypeOf<System.ArgumentOutOfRangeException>());
     }
+
+    [Test]
+    public void CopyTo_WithSequences_IncreasesInWriteOrder()
+    {
+        var sink = new LogHistorySink(2);
+        WriteMessages(sink, "a", "b", "c");
+        var destination = new LogEntry[2];
+        var sequences = new long[2];
+
+        int copied = sink.CopyTo(destination, sequences, out int version);
+
+        Assert.That(copied, Is.EqualTo(2));
+        Assert.That(Messages(destination, copied), Is.EqualTo(new[] { "b", "c" }));
+        Assert.That(sequences[1], Is.GreaterThan(sequences[0]));
+        Assert.That(version, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Sequences_SharedAcrossSinks_ReflectInterleavedWrites()
+    {
+        var first = new LogHistorySink(3);
+        var second = new LogHistorySink(3);
+        first.Write(Entry("a"));
+        second.Write(Entry("b"));
+        first.Write(Entry("c"));
+        var firstSequences = new long[3];
+        var secondSequences = new long[3];
+
+        first.CopyTo(new LogEntry[3], firstSequences, out _);
+        second.CopyTo(new LogEntry[3], secondSequences, out _);
+
+        Assert.That(firstSequences[0], Is.LessThan(secondSequences[0]));
+        Assert.That(secondSequences[0], Is.LessThan(firstSequences[1]));
+    }
 }
