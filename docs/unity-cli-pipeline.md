@@ -27,7 +27,7 @@
 | 連線開著的 Editor | 已驗證：`unity status` 列出本專案，狀態 `ready` (Editor 由使用者以 `unity open .` 開啟) | `unity status` |
 | EditMode 測試 (開著的 Editor) | 已驗證：8/8 通過 | `unity command run_tests --mode editor` |
 | PlayMode 測試 (開著的 Editor) | 已驗證：7/7 通過 (需非同步執行，見下方) | `unity command run_tests --mode playmode --async_tests true` |
-| `unity test` (batch mode) | **失敗**：授權啟用後，首次匯入時 Editor 在 Burst 編譯器中以 SIGBUS 當機，未產生結果 (退出碼 6)。原因未確認，推測是 AI 工具的 shell 沙箱擋住 Burst 產生的原生程式碼；Windows 上曾於 2026-10-01 跑出 8/8 通過 | 見下方「Editor 關閉時」 |
+| `unity test` (batch mode) | 已驗證 (2026-11-02，AI 工具的 shell)：EditMode 8/8、PlayMode 16/16 通過，退出碼 0。前提是專案已由 Editor 完成首次匯入；`Library/` 尚未建立時曾當機，見「已知注意事項」。Windows 上曾於 2026-10-01 跑出 8/8 通過 | 見下方「Editor 關閉時」 |
 
 ## 執行前檢查
 
@@ -43,7 +43,13 @@ unity license status     # 是否有啟用中的授權 (batch mode 需要)
 unity pipeline editors   # 各專案的 Pipeline 套件狀態，含 Safe Mode 欄位
 unity status             # 已連線的 Editor (Port、專案、版本、PID、狀態)
 git status --short       # 記下原有變更，執行後比對
+
+# Editor 開著時：確認是否在 Play 模式或編譯中 (回傳 "False,False" 才可執行測試)
+unity command eval 'return UnityEditor.EditorApplication.isPlaying + "," + UnityEditor.EditorApplication.isCompiling;'
 ```
+
+- `unity status` 在 Play 模式下仍顯示 `ready`；Play 模式中執行 `run_tests` 會因 `This cannot be used during play mode` 失敗並一直等到逾時 (2026-11-02 macOS 實測)。
+- `unity recompile` 不一定會讓 Editor 載入剛改的檔案 (2026-11-02 實測 PlayMode 跑的是舊組件)。修改檔案後先執行 `unity command eval 'UnityEditor.AssetDatabase.Refresh(); return "ok";'` 再 `unity recompile`，並在結果中核對新測試有在名單內。
 
 - `unity status` 有列出本專案且狀態為 `ready` → 照「Editor 開著時」操作。
 - `unity status` 沒有列出 → 先排除下方「連不上的常見原因」，再照「Editor 關閉時」操作。
@@ -95,7 +101,7 @@ unity command test_status --format json   # status 從 running 變成 completed 
 
 和 Editor 執行檔命令列相同的限制：同一專案不可同時在 Editor 與 batch mode 執行。
 
-### 執行測試 (Windows 上已驗證；macOS 上首次匯入時當機，見「已知注意事項」)
+### 執行測試 (Windows、macOS 上已驗證；macOS 需先完成首次匯入，見「已知注意事項」)
 
 ```bash
 resultPath="${TMPDIR:-/tmp}/TorbenJuniorUtility-editmode-results.xml"
@@ -152,7 +158,7 @@ unity build . --list-targets
 ## 已知注意事項
 
 - **batch mode 可能改到 `ProjectSettings/`**：2026-10-01 執行 `unity test` 後，當時安裝的 `com.unity.ai.inference` 套件 (之後已移除) 自動從 `ProjectSettings/ProjectSettings.asset` 的 `scriptingDefineSymbols` 移除了 `SENTIS_ANALYTICS_ENABLED`。執行後務必用 `git status` 比對；這類變更不是任務成果，應回報使用者決定保留或還原。
-- **macOS 上 batch mode 首次匯入當機**：2026-10-30 在 AI 工具的 shell (macOS 沙箱) 中執行 `unity test`，Editor 匯入 shader 時於 Burst 編譯器 (`Burst.Compiler.IL.Server.LibraryCompiler:CompileMethodGroupImpl`) 以 SIGBUS 當機，退出碼 6。由使用者在一般終端機以 `unity open .` 開啟並完成匯入後，改用開著的 Editor 執行測試即正常。沙箱是否為原因尚未驗證。
+- **macOS 上 batch mode 首次匯入當機**：2026-10-30 在 AI 工具的 shell 中、`Library/` 尚未建立時執行 `unity test`，Editor 匯入 shader 時於 Burst 編譯器 (`Burst.Compiler.IL.Server.LibraryCompiler:CompileMethodGroupImpl`) 以 SIGBUS 當機，退出碼 6。使用者在一般終端機以 `unity open .` 開啟並完成匯入後，2026-11-02 在同樣的 AI 工具 shell 中執行 `unity test` (EditMode、PlayMode) 均正常，因此沙箱不是一般性的原因；當機只在首次匯入時出現過。若在新環境或清除 `Library/` 後遇到，先用 `unity open .` 開啟 Editor 完成匯入、關閉後再執行。首次匯入是否每次都會當機未再驗證。
 - **macOS 上開啟專案會產生換行符號差異**：`.gitattributes` 設定 `* text=auto eol=crlf`，但 macOS 上的 Unity 存檔時寫 LF，被重新存檔的資產會出現在 `git status`，`git diff` 卻沒有內容差異。這類檔案屬於 `AGENTS.md` 的「不用提交」：`git add` 後不會產生變更，`git status` 的標記也會消失。
 - **動態字型會在顯示文字時自動補字**：TextMeshPro 字型資源若為動態模式 (`m_AtlasPopulationMode: 1`)，Editor 或 PlayMode 測試顯示文字時會把缺少的字與圖集寫回 `SDF.asset`；開著的場景若用到該字型，Clear Dynamic Data 後也會立刻補回。這是預期雜訊，依 `AGENTS.md` 歸為「不獨立提交」，只有異常時才回報。
 - **日誌含存取權杖**：`unity test` 寫入 `~/Library/Logs/Unity/Editor.log` 的啟動參數含 `-accessToken`。分享日誌前先移除該行。

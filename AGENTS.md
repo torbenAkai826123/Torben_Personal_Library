@@ -124,6 +124,9 @@ TextMeshPro 動態字型 (`SDF.asset`) 的變動是 Editor 顯示文字時自動
 ## 測試
 
 - 改到 Core：執行 `dotnet test`，不受 Editor 是否開啟影響。
+- 執行前先檢查 Editor 是否開啟、是否在 Play 模式或編譯中，依結果決定工具路由 (指令見 [`docs/unity-cli-pipeline.md`](docs/unity-cli-pipeline.md)「執行前檢查」)。`unity status` 在 Play 模式下仍顯示 `ready`，不能只看它。檢查與執行分成兩步，看到檢查結果再執行。Editor 在 Play 模式時不執行測試，先提醒使用者結束 Play。
+- 前一次回報有請使用者驗證的項目，且使用者回覆已驗證時，可假定 Editor 已開啟；但使用者可能剛在 Play 模式驗證，執行前仍要確認已離開 Play 模式。
+- Editor 開著或關閉都能執行的方法 (例如 `dotnet test`、只讀取檔案的檢查) 可優先使用，不受下方工具順序限制。
 - 改到 Runtime／Editor：跑 EditMode + PlayMode。依下列順序選擇工具，前一項無法執行才換下一項，不必事先詢問；換工具時回報前一項失敗的原因：
   1. Editor 開著且 `unity status` 為 `ready`：用 Unity CLI 讓開著的 Editor 執行測試 (`unity command run_tests`)。
   2. Editor 關閉：用 Unity CLI 的 `unity test`。
