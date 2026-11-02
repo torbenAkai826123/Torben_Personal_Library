@@ -25,8 +25,20 @@ static void SetupLog()
 Log.Information("載入完成");
 Log.Warning("找不到存檔，使用預設值");
 Log.Error("連線失敗");
-Log.Debug("hp=" + hp);               // 只有 isDebugLog 開啟時才會輸出
+Log.Debug("讀取設定");                // 只有 isDebugLog 開啟時才會輸出
 ```
+
+訊息裡要放變數時，用 `XxxFormat`，不要用 `+` 或 `$"..."`：
+
+```csharp
+Log.DebugFormat("hp={0}", hp);                                    // 開啟時才組字串
+Log.WarningFormat(NetworkCategory.Instance, "重試 {0}/{1}", n, max); // 有分類時放第一個
+
+if (Log.IsEnabled(LogLevel.Debug))   // 參數超過 3 個或組字串較複雜時
+    Log.Debug(BuildReport());
+```
+
+原因：`"hp=" + hp` 和 `$"hp={hp}"` 在呼叫前就會組好字串，即使 Log 關著也會產生記憶體配置 (GC)。`XxxFormat` 在 Log 關閉時什麼都不做。
 
 ## 3. 加上分類標籤 (可省略)
 
@@ -100,3 +112,5 @@ DebugWindow.SetLevelVisible(LogLevel.Debug, false);
 | Console 突然沒訊息 | `DebugLogs.isGUILog` 開著，訊息改到畫面視窗了 |
 | 啟動最初幾行沒出現 | 那時 `isPrintLog` 還沒打開，這些訊息不會補記 |
 | 設定好像沒生效 | 設定得太早被重設，改在 `BeforeSceneLoad` 之後設定 |
+| 訊息裡的 `<b>`、`<color=...>` 變成粗體或顏色 | 訊息支援 rich text 標記，Console 和畫面視窗都會解讀 |
+| `XxxFormat` 丟出 `FormatException` | `{0}` 的編號超過參數數量，或大括號沒成對 |

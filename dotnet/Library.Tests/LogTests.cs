@@ -15,6 +15,13 @@ public sealed class TestCatlog : LogCategory
     private TestCatlog() : base("Test") { }
 }
 
+// 記錄 ToString 被呼叫的次數, 用來確認關閉時沒有格式化參數
+public sealed class CountingArg
+{
+    public int ToStringCount;
+    public override string ToString() { ToStringCount++; return "arg"; }
+}
+
 [TestFixture]
 public class LogTests
 {
@@ -148,5 +155,93 @@ public class LogTests
         {
             Torben.Log.isPrintLog = true;
         }
+    }
+    [Test]
+    public void IsEnabled_ReflectsSwitchesAndSinks()
+    {
+        Assert.That(Log.IsEnabled(LogLevel.Normal), Is.True);
+        Assert.That(Log.IsEnabled(LogLevel.Debug), Is.False);
+
+        Torben.Log.isDebugLog = true;
+        Assert.That(Log.IsEnabled(LogLevel.Debug), Is.True);
+
+        Log.ClearSinks();
+        Assert.That(Log.IsEnabled(LogLevel.Normal), Is.False);
+    }
+
+    [Test]
+    public void IsEnabled_PrintLogOff_False()
+    {
+        Torben.Log.isPrintLog = false;
+        try
+        {
+            Assert.That(Log.IsEnabled(LogLevel.Error), Is.False);
+        }
+        finally
+        {
+            Torben.Log.isPrintLog = true;
+        }
+    }
+
+    [Test]
+    public void Format_Enabled_WritesFormattedMessage()
+    {
+        Log.InformationFormat("a={0} b={1} c={2}", 1, "x", 2.5f);
+
+        Assert.That(_sink.Entries, Has.Count.EqualTo(1));
+        Assert.That(_sink.Entries[0].Level, Is.EqualTo(LogLevel.Normal));
+        Assert.That(_sink.Entries[0].Message, Is.EqualTo(string.Format("a={0} b={1} c={2}", 1, "x", 2.5f)));
+        Assert.That(_sink.Entries[0].Category.Tag, Is.EqualTo(string.Empty));
+    }
+
+    [Test]
+    public void Format_WithCategory_UsesCategoryAndLevel()
+    {
+        Log.WarningFormat(TestCatlog.Instance, "retry {0}/{1}", 1, 3);
+
+        Assert.That(_sink.Entries, Has.Count.EqualTo(1));
+        Assert.That(_sink.Entries[0].Level, Is.EqualTo(LogLevel.Warning));
+        Assert.That(_sink.Entries[0].Category.Tag, Is.EqualTo("[Test]"));
+        Assert.That(_sink.Entries[0].Message, Is.EqualTo("retry 1/3"));
+    }
+
+    [Test]
+    public void Format_DebugDisabled_DoesNotFormatArguments()
+    {
+        var arg = new CountingArg();
+
+        Log.DebugFormat("{0}", arg);
+
+        Assert.That(_sink.Entries, Is.Empty);
+        Assert.That(arg.ToStringCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Format_PrintLogOff_DoesNotFormatArguments()
+    {
+        var arg = new CountingArg();
+        Torben.Log.isPrintLog = false;
+        try
+        {
+            Log.ErrorFormat(TestCatlog.Instance, "{0}", arg);
+        }
+        finally
+        {
+            Torben.Log.isPrintLog = true;
+        }
+
+        Assert.That(_sink.Entries, Is.Empty);
+        Assert.That(arg.ToStringCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void SystemCategory_TagIncludesCustomTags_AndWritesNoLog()
+    {
+        Torben.Log.isDebugLog = true;
+
+        var category = new SystemCategory("value", "DOL", "Text");
+
+        Assert.That(category.Tag, Is.EqualTo("[String][DOL][Text]"));
+        Assert.That(_sink.Entries, Is.Empty);
     }
 }

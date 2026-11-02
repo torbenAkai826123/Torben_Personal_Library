@@ -154,4 +154,11 @@ public class LogHistorySinkTests
 
         Assert.That(Messages(destination, copied), Is.EqualTo(new[] { "c" }));
     }
+
+    [TestCase(0)]
+    [TestCase(-1)]
+    public void Constructor_CapacityBelowOne_Throws(int capacity)
+    {
+        Assert.That(() => new LogHistorySink(capacity), Throws.TypeOf<System.ArgumentOutOfRangeException>());
+    }
 }

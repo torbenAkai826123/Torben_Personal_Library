@@ -10,7 +10,7 @@ namespace Torben
         {
             get
             {
-                // 只有當 instance 為 null 時，才會嘗試尋找或創建 GroundStaticObject 實例。
+                // 只有當 instance 為 null 時，才會嘗試尋找或創建 CrossObject 實例。
                 if (instance == null)
                 {
                     if (IsReady)
@@ -36,12 +36,12 @@ namespace Torben
 
         // Open API
 
-        // 檢查 GroundStaticObject 是否已經準備好，並且有實例存在。
+        // 檢查 CrossObject 是否已經準備好，並且有實例存在。
         public void PrintInfo()
         {
-            if (Torben.Log.isPrintLog && Torben.Log.HasSink)
+            if (Torben.Log.IsEnabled(LogLevel.Normal))
             {
-                Torben.Log.Information("GroundStaticObject is ready.", crossObjectCategory ?? null);
+                Torben.Log.Information("CrossObject is ready.", crossObjectCategory);
             }
             else
             {

@@ -11,7 +11,13 @@ namespace Torben
         private int count;
         private int version;
 
-        public LogHistorySink(int capacity) { buffer = new LogEntry[capacity]; }
+        /// <summary>建立可保留最新 capacity 筆的歷史紀錄; capacity 小於 1 時丟出 ArgumentOutOfRangeException.</summary>
+        /// <remarks>配置: 僅初始化時配置.</remarks>
+        public LogHistorySink(int capacity)
+        {
+            if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "capacity must be at least 1.");
+            buffer = new LogEntry[capacity];
+        }
 
         public int Version { get { lock (gate) return version; } }
 

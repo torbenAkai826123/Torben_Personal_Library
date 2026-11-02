@@ -66,7 +66,7 @@ namespace Torben
         /// <remarks>配置: 零配置.</remarks>
         public static LogHistorySink History => history;
 
-        /// <summary>視窗大小 (縮放前的單位). 預設 200 x 120.
+        /// <summary>視窗大小 (縮放前的單位). 預設 600 x 180, 最小 80 x 60.
         /// 開啟視窗時, 寬或高超過畫面的那一邊會改為畫面該方向的一半.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static Vector2 Size

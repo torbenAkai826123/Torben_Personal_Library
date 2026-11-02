@@ -56,12 +56,31 @@ Log.Information / Warning / Error / Debug   (Core, 純 C#)
 | 成員 | 說明 | 配置 |
 |---|---|---|
 | `Information / Warning / Error / Debug(message, category = null)` | 產生訊息並送給每個 sink; `category` 為 null 時使用空分類 | 本身零配置; 各 sink 自行決定 |
+| `InformationFormat / WarningFormat / ErrorFormat / DebugFormat([category,] format, arg1[, arg2[, arg3]])` | 開啟時才以 `string.Format` 組字串; 分類放第一個參數 | 關閉時零配置; 開啟時每次呼叫配置 (字串、值型別裝箱) |
+| `IsEnabled(level)` | 該等級的訊息目前是否會送到 sink (`isPrintLog`、至少一個 sink、Debug 另需 `isDebugLog`) | 零配置 |
 | `AddSink(ILogSink)` | 加入 sink; 已存在或 null 時不做事 | 每次呼叫配置新陣列 |
 | `RemoveSink(ILogSink)` | 移除 sink; 不存在時不做事 | 有移除時配置新陣列 |
 | `ClearSinks()` | 移除全部 sink | 零配置 |
 | `HasSink` | 是否至少有一個 sink | 零配置 |
 
 sink 清單採 copy-on-write: 新增或移除時建立新陣列再整個替換, 寫入時只讀取當下的陣列, 不需加鎖。新增或移除不應在每幀執行。
+
+### 避免關閉時的配置
+
+開關檢查在 `Log` 內部, 參數在呼叫前就已建立。`Log.Debug($"hp={hp}")` 或 `"hp=" + hp` 即使 Log 關閉也會組字串。需要組字串時改用下列其中一種:
+
+```csharp
+Log.DebugFormat("hp={0}", hp);                          // 開啟時才格式化
+Log.WarningFormat(NetworkCategory.Instance, "retry {0}/{1}", n, max);
+
+if (Log.IsEnabled(LogLevel.Debug))                     // 需要較複雜的組字串時
+    Log.Debug(BuildReport());
+```
+
+- 參數以泛型傳入, 關閉時不裝箱; 最多 3 個參數, 更多時用 `IsEnabled`。
+- 不提供 `Debug(string, T)` 這類同名多載: 傳入分類子類別時, 泛型多載會比 `LogCategory` 參數更優先, 分類會被當成格式參數。
+- `format` 格式錯誤時 `string.Format` 丟出的 `FormatException` 會傳回呼叫端。
+- 字串常值 (例如 `Log.Debug("ready")`) 不配置, 照原本寫法即可。
 
 自訂 sink 只需實作 `ILogSink.Write(in LogEntry entry)`, 再用 `Log.AddSink` 加入。`LogEntry` 包含 `Level`、`Category`、`Message`。
 
@@ -81,6 +100,8 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 
 - `Tag`: 預設為 `[IdentifierName]`; 覆寫 `UpdateTag()` 可自訂格式 (參考 `SystemCategory`)。
 - `tagColorHex`: **只影響標籤**的顏色。訊息文字的顏色由等級決定, 見下方 `SetLevelColor`。
+- `SystemCategory(object value, params string[] tags)`: 標籤為 `[型別名][tag1][tag2]...`。
+- 訊息與標籤不跳脫 rich text: `<color>`、`<b>` 等標記會被 Console 與畫面視窗解讀, 可當成格式功能使用。要原樣顯示 `<` 開頭的文字時需自行處理。
 
 ## DebugWindow API
 
@@ -97,7 +118,15 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `Scale` | `0` | 介面縮放倍率; `0` 表示依 `Screen.height / 720` 自動計算 (最小 1 倍), 視窗佔畫面的比例固定 |
 | `SearchText` | `""` | 搜尋文字; 比對標籤與訊息, 不分大小寫 |
 | `IsLevelVisible(level)` / `SetLevelVisible(level, bool)` | 全部顯示 | 依等級篩選; 視窗上方 N / W / E / D 開關同步此設定 |
+| `History.Clear()` | — | 清空歷史紀錄; 視窗的 Clear 按鈕也是呼叫它 |
 | `GetLevelColor(level)` / `SetLevelColor(level, hex)` | Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`、Normal 無 | 訊息文字顏色; null 或空字串表示預設文字色 |
+
+### 視窗操作
+
+- 上方一列: N / W / E / D 等級開關、`Clear`、`X`; 下方為搜尋框與捲動清單。
+- `Clear` 為兩段式確認: 第一次點擊進入清除狀態 (按鈕變黃), 再點一次才清除 (按住時紅色); 在視窗其他位置按下滑鼠即取消。
+- `X` 等同 `DebugLogs.isGUILog = false`, 一併恢復 Console 輸出。
+- 開啟視窗與拖曳結束時: 寬或高超過畫面時改為畫面該方向的一半; 自訂位置超出畫面時拉回邊緣。
 
 ### 繪製與效能
 
@@ -122,8 +151,8 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 
 | 檔案 | 類型 | 內容 |
 |---|---|---|
-| `dotnet/Library.Tests/LogTests.cs` | dotnet | 多 sink、重複加入、移除、`HasSink`、`isDebugLog`、`isPrintLog` |
-| `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號 |
+| `dotnet/Library.Tests/LogTests.cs` | dotnet | 多 sink、重複加入、移除、`HasSink`、`isDebugLog`、`isPrintLog`、`IsEnabled`、`XxxFormat` (含關閉時不格式化參數)、`SystemCategory` 標籤 |
+| `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號、`Clear`、容量小於 1 時丟例外 |
 | `Scripts/Tests/PlayMode/DebugWindowTests.cs` | PlayMode | 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置 |
 
 執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋) 需在 Play 時人工確認。

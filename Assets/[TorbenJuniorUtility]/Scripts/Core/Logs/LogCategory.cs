@@ -41,23 +41,20 @@ namespace Torben
     }
 
     public sealed class SystemCategory : LogCategory
-    { 
-        public static SystemCategory Instance { get; private set; } 
-
+    {
         string[] customTags;
 
         public SystemCategory(object value, params string[] tags) : base(value.GetType().Name)
         {
-            Instance = this;
             customTags = tags;
-            UpdateTag();
+            UpdateTag();    // 基底建構子呼叫 UpdateTag 時 customTags 尚未指定, 這裡再重建一次
         }
 
         // 修改 UpdateTag 方法，讓它返回的字串可以改成想要的結果。
+        // 分類物件不寫 Log, 避免建立分類時產生訊息
         protected override string UpdateTag()
         {
             string mainTag = IdentifierName;
-            Log.Debug($"Main tag is:{mainTag}, custom tag has {customTags?.Length ?? 0} entries" ); // Log the main tag for debugging purposes.
             if (!string.IsNullOrEmpty(mainTag) && customTags != null && customTags.Length > 0)
             {
                 string customTagString = string.Join("][", customTags);
