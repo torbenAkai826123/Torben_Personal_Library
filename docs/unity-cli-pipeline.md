@@ -23,10 +23,10 @@
 | 登入 | 已登入，憑證存在 macOS 鑰匙圈 (`credentialSource: keyring`)。若回報未登入 (退出碼 3)，由使用者執行 `unity auth login` | `unity auth status --format json` |
 | 授權 | Unity Personal 已啟用。登入不等於啟用授權，每台機器要各自啟用；沒有授權時 Editor 會以結束碼 198 停止 (`EDITOR_LICENSING_FAILURE`)，由使用者執行 `unity license activate --personal --accept-eula` | `unity license status` |
 | Editor | `6000.5.5f1` (arm64) 已安裝，與專案版本相符，位置 `/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app`；已裝模組：Android (含 SDK、NDK、OpenJDK)、Mac Standalone。**沒有 iOS 與 Windows 建置模組** | `unity editors -i` |
-| Pipeline 套件 | `0.8.0-exp.1` 已在 `Packages/manifest.json`，CLI 回報有新版可升級 (未升級) | `unity pipeline editors` |
+| Pipeline 套件 | `0.9.1-exp.1` (2026-11-02 以 `unity pipeline upgrade` 從 `0.8.0-exp.1` 升級)，已在 `Packages/manifest.json` | `unity pipeline editors` |
 | 連線開著的 Editor | 已驗證：`unity status` 列出本專案，狀態 `ready` (Editor 由使用者以 `unity open .` 開啟) | `unity status` |
-| EditMode 測試 (開著的 Editor) | 已驗證：8/8 通過 | `unity command run_tests --mode editor` |
-| PlayMode 測試 (開著的 Editor) | 已驗證：7/7 通過 (需非同步執行，見下方) | `unity command run_tests --mode playmode --async_tests true` |
+| EditMode 測試 (開著的 Editor) | 已驗證 (2026-11-02，`0.9.1-exp.1`)：8/8 通過 | `unity command test run --mode editor` |
+| PlayMode 測試 (開著的 Editor) | 已驗證 (2026-11-02，`0.9.1-exp.1`)：17/17 通過 (需非同步執行，見下方) | `unity command test run --mode playmode --async_tests true` |
 | `unity test` (batch mode) | 已驗證 (2026-11-02，AI 工具的 shell)：EditMode 8/8、PlayMode 16/16 通過，退出碼 0。前提是專案已由 Editor 完成首次匯入；`Library/` 尚未建立時曾當機，見「已知注意事項」。Windows 上曾於 2026-10-01 跑出 8/8 通過 | 見下方「Editor 關閉時」 |
 
 ## 執行前檢查
@@ -45,11 +45,11 @@ unity status             # 已連線的 Editor (Port、專案、版本、PID、�
 git status --short       # 記下原有變更，執行後比對
 
 # Editor 開著時：確認是否在 Play 模式或編譯中 (回傳 "False,False" 才可執行測試)
-unity command eval 'return UnityEditor.EditorApplication.isPlaying + "," + UnityEditor.EditorApplication.isCompiling;'
+unity command script eval 'return UnityEditor.EditorApplication.isPlaying + "," + UnityEditor.EditorApplication.isCompiling;'
 ```
 
-- `unity status` 在 Play 模式下仍顯示 `ready`；Play 模式中執行 `run_tests` 會因 `This cannot be used during play mode` 失敗並一直等到逾時 (2026-11-02 macOS 實測)。
-- `unity recompile` 不一定會讓 Editor 載入剛改的檔案 (2026-11-02 實測 PlayMode 跑的是舊組件)。修改檔案後先執行 `unity command eval 'UnityEditor.AssetDatabase.Refresh(); return "ok";'` 再 `unity recompile`，並在結果中核對新測試有在名單內。
+- `unity status` 在 Play 模式下仍顯示 `ready`；Play 模式中執行 `run_tests` 會因 `This cannot be used during play mode` 失敗並一直等到逾時 (2026-11-02 macOS 以 `0.8.0-exp.1` 實測；`0.9.1-exp.1` 的 `test run` 未重測)。
+- `unity recompile` 不一定會讓 Editor 載入剛改的檔案 (2026-11-02 實測 PlayMode 跑的是舊組件)。修改檔案後先執行 `unity command script eval 'UnityEditor.AssetDatabase.Refresh(); return "ok";'` 再 `unity recompile`，並在結果中核對新測試有在名單內。
 
 - `unity status` 有列出本專案且狀態為 `ready` → 照「Editor 開著時」操作。
 - `unity status` 沒有列出 → 先排除下方「連不上的常見原因」，再照「Editor 關閉時」操作。
@@ -63,10 +63,10 @@ unity command eval 'return UnityEditor.EditorApplication.isPlaying + "," + Unity
 unity status                                  # 確認狀態為 ready
 unity command                                 # 列出此 Editor 提供的指令
 unity command --query scene                   # 以關鍵字篩選指令
-unity command --query run_tests --detail full --format json   # 查指令的參數結構 (schema)
+unity command --query test --detail full --format json   # 查指令的參數結構 (schema)
 unity commands --grep <關鍵字>                 # 搜尋 CLI 本身的指令 (不需連線 Editor)
 unity command <指令名稱> [--參數 值...]         # 執行一個指令
-unity command eval '<C# 程式碼>'              # 若 Editor 提供 eval，可執行任意 C#
+unity command script eval '<C# 程式碼>'       # 執行任意 C# (舊名稱 eval 在 0.9.1-exp.1 仍可用)
 unity recompile                               # 重新編譯並回報編譯錯誤；--strict 連警告也算失敗
 ```
 
@@ -77,19 +77,22 @@ unity recompile                               # 重新編譯並回報編譯錯�
 
 ### 在開著的 Editor 執行測試 (macOS 上已驗證)
 
-`run_tests` 的參數 (`0.8.0-exp.1`)：`--mode` 為 `all`、`editor`、`playmode` (預設 `all`)；`--filter` 與 `--filter_type` (`testName`、`assembly`、`category`) 篩選測試；`--timeout` 預設 300 秒；`--async_tests true` 改為非同步執行。
+`test run` 的參數 (`0.9.1-exp.1`)：`--mode` 為 `all`、`editor`、`playmode` (預設 `all`)；`--filter` 與 `--filter_type` (`testName`、`assembly`、`category`) 篩選測試；`--include_explicit` 包含標記 `[Explicit]` 的測試；`--timeout` 預設 600 秒；`--async_tests true` 改為非同步執行。另有 `test list` 列出測試、`test cancel` 取消執行中的測試。
+
+- `0.9.1-exp.1` 把 `run_tests`、`test_status` 改名為 `test run`、`test status`，舊名稱已查不到 (2026-11-02 macOS 實測)；參數與輸出格式不變。
+- 升級套件 (改 `Packages/manifest.json`) 後，開著的 Editor 不會自動載入新版：`unity pipeline editors` 仍顯示舊版。執行 `unity command script eval 'UnityEditor.PackageManager.Client.Resolve(); return "ok";'`，等 `pipelineVersion` 變成新版且 `serverReachable` 為 `true` 再操作；`Packages/packages-lock.json` 會跟著更新，與 manifest 一起提交。
 
 ```bash
 # EditMode：可同步執行，直接回傳結果
-unity command run_tests --mode editor --timeout 600 --format json
+unity command test run --mode editor --format json
 
 # PlayMode：必須非同步執行，再查詢結果
-unity command run_tests --mode playmode --async_tests true --format json
-unity command test_status --format json   # status 從 running 變成 completed 後讀 summary
+unity command test run --mode playmode --async_tests true --format json
+unity command test status --format json   # status 從 running 變成 completed 後讀 summary
 ```
 
 - **PlayMode 不能同步執行**：進入 Play Mode 會重新載入 domain，HTTP 請求會斷掉。同步執行時，CLI 外層仍回報 `success: true` 且退出碼為 0，但 `data.result.success` 為 `false`、`Total` 為 0，錯誤訊息在 `data.result.error`。
-- 因此判斷 `run_tests` 結果時，不能只看退出碼與外層 `success`，要檢查 `data.result.success` 與 `Summary` (非同步時為 `test_status` 的 `summary`) 的 `Total`、`Failed`。
+- 因此判斷 `test run` 結果時，不能只看退出碼與外層 `success`，要檢查 `data.result.success` 與 `Summary` (非同步時為 `test status` 的 `summary`) 的 `Total`、`Failed`。
 
 ### 連不上的常見原因
 
