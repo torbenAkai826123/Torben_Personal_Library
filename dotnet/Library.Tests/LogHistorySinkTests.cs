@@ -128,4 +128,30 @@ public class LogHistorySinkTests
         Assert.That(copied, Is.EqualTo(2));
         Assert.That(version, Is.EqualTo(3));
     }
+
+    [Test]
+    public void Clear_RemovesAllAndIncrementsVersion()
+    {
+        var sink = new LogHistorySink(3);
+        WriteMessages(sink, "a", "b", "c", "d");
+
+        sink.Clear();
+
+        Assert.That(sink.CopyTo(new LogEntry[3]), Is.EqualTo(0));
+        Assert.That(sink.Version, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void Clear_ThenWrite_ReturnsOnlyNewEntries()
+    {
+        var sink = new LogHistorySink(3);
+        WriteMessages(sink, "a", "b");
+
+        sink.Clear();
+        WriteMessages(sink, "c");
+        var destination = new LogEntry[3];
+        int copied = sink.CopyTo(destination);
+
+        Assert.That(Messages(destination, copied), Is.EqualTo(new[] { "c" }));
+    }
 }

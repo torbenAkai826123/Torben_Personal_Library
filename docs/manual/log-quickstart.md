@@ -64,18 +64,28 @@ AddButton("GUI Status " + (DebugLogs.isGUILog ? "ON" : "OFF"),
 
 - 用 **N / W / E / D** 切換顯示 Normal、Warning、Error、Debug。
 - 在搜尋框輸入文字篩選 (不分大小寫)。
-- 拖曳標題列移動視窗。
+- 拖曳標題列移動視窗；放開時若超出畫面，會自動拉回畫面邊緣。
+- 按 **Clear** 清空目前所有訊息 (清掉的訊息不會再出現)。
+- 按 **X** 關閉視窗，效果同 `DebugLogs.isGUILog = false` (Console 恢復輸出)。
+
+開啟視窗時，若寬或高超過畫面，該方向會縮成畫面的一半；位置超出畫面也會拉回邊緣。
 
 ## 5. 調整視窗 (可省略)
 
 ```csharp
+// 基本調整
 DebugWindow.Size = new Vector2(600, 180);
 DebugWindow.Position = new Vector2(10, 10);   // DebugWindow.ResetPosition() 回到右下角
-DebugWindow.IsDraggable = false;
-DebugWindow.SetLevelVisible(LogLevel.Debug, false);
+DebugWindow.IsDraggable = false;	// 調整是否拖曳
+DebugWindow.SearchText = "Network";	// 比對文字顯示
+DebugWindow.Scale = 2f;                        // 0 = 依畫面高度自動 (高 720 為 1 倍)
+
+// 自訂訊息層級的顏色: DebugWindow.SetLevelColor(訊息層級, 指定顏色(Hex))
 DebugWindow.SetLevelColor(LogLevel.Normal, "#FFFFFF");
-DebugWindow.SearchText = "Network";
-DebugWindow.Scale = 2f;                        // 0 = 依螢幕 DPI 自動
+
+// 切換顯示訊息層級
+DebugWindow.SetLevelVisible(LogLevel.Debug, false); 
+
 ```
 
 ## 常見問題

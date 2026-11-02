@@ -120,4 +120,47 @@ public sealed class DebugWindowTests
         var size = DebugWindow.Size;
         Assert.That(DebugWindow.Position.x + size.x, Is.GreaterThan(5f + size.x));
     }
+
+    [Test]
+    public void Open_OversizedWindow_ShrinksToHalfScreen()
+    {
+        var savedSize = DebugWindow.Size;
+        float s = DebugWindow.Scale = 1f;
+        DebugWindow.Size = new Vector2(Screen.width * 2f, Screen.height * 2f);
+
+        DebugLogs.isGUILog = true;
+
+        Assert.That(DebugWindow.Size, Is.EqualTo(new Vector2(Screen.width / s * 0.5f, Screen.height / s * 0.5f)));
+        DebugWindow.Size = savedSize;
+        DebugWindow.Scale = 0f;
+    }
+
+    [Test]
+    public void Open_OffscreenPosition_ClampedToEdge()
+    {
+        DebugWindow.Scale = 1f;
+        DebugWindow.Position = new Vector2(Screen.width + 100f, -50f);
+
+        DebugLogs.isGUILog = true;
+
+        var size = DebugWindow.Size;    // 畫面太小時開啟會縮小, 開啟後再取
+        Assert.That(DebugWindow.Position, Is.EqualTo(new Vector2(Screen.width - size.x, 0f)));
+        DebugWindow.Scale = 0f;
+    }
+
+    [Test]
+    public void AutoScale_FollowsScreenHeight()
+    {
+        var savedSize = DebugWindow.Size;
+        DebugWindow.Scale = 0f;
+        DebugWindow.Size = new Vector2(Screen.width * 2f, Screen.height * 2f);
+
+        DebugLogs.isGUILog = true;
+
+        // 開啟時過大的視窗縮成畫面的一半, 畫面大小以自動倍率換算
+        float s = Mathf.Max(1f, Screen.height / 720f);
+        Assert.That(DebugWindow.Size.x, Is.EqualTo(Screen.width / s * 0.5f).Within(0.01f));
+        Assert.That(DebugWindow.Size.y, Is.EqualTo(Screen.height / s * 0.5f).Within(0.01f));
+        DebugWindow.Size = savedSize;
+    }
 }

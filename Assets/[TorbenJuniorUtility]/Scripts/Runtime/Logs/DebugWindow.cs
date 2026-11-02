@@ -13,6 +13,7 @@ namespace Torben
         private const int WindowId = 0x4C4F47;
         private const float Margin = 10f;
         private const float TitleBarHeight = 18f;
+        private const float ReferenceHeight = 720f;   // 自動縮放時, 畫面高 720 為 1 倍
 
         private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
         private static readonly int levelCount = levelNames.Length;
@@ -29,7 +30,7 @@ namespace Torben
         private static bool hasCustomPosition;  // false = 預設右下角
         private static bool draggable;
         private static bool autoScroll;
-        private static float scale;             // 0 = 依螢幕 DPI 自動
+        private static float scale;             // 0 = 依畫面高度自動
         private static string searchText;
         private static bool[] levelVisible;
         private static string[] levelColors;
@@ -50,6 +51,9 @@ namespace Torben
         private GUI.WindowFunction drawWindow;
         private GUIStyle lineStyle;
         private GUIContent[] levelToggleLabels;
+        private GUIContent clearLabel;
+        private GUIContent closeLabel;
+        private bool dragging;
 
         // 確保尚未進入 Play (未經 DebugLogs.Install) 時存取設定也有預設值
         static DebugWindow() => ResetStatics();
@@ -60,7 +64,8 @@ namespace Torben
         /// <remarks>配置: 零配置.</remarks>
         public static LogHistorySink History => history;
 
-        /// <summary>視窗大小 (縮放前的單位). 預設 200 x 120.</summary>
+        /// <summary>視窗大小 (縮放前的單位). 預設 200 x 120.
+        /// 開啟視窗時, 寬或高超過畫面的那一邊會改為畫面該方向的一半.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static Vector2 Size
         {
@@ -68,7 +73,8 @@ namespace Torben
             set => size = new Vector2(Mathf.Max(80f, value.x), Mathf.Max(60f, value.y));
         }
 
-        /// <summary>視窗左上角位置 (縮放前的單位). 設定後不再自動貼齊右下角; 拖曳也會更新此值.</summary>
+        /// <summary>視窗左上角位置 (縮放前的單位). 設定後不再自動貼齊右下角; 拖曳也會更新此值.
+        /// 開啟視窗與拖曳結束時, 超出畫面的部分會被拉回畫面邊緣.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static Vector2 Position
         {
@@ -98,7 +104,7 @@ namespace Torben
             set => autoScroll = value;
         }
 
-        /// <summary>介面縮放倍率; 0 表示依螢幕 DPI 自動計算 (以 96 DPI 為 1 倍). 預設 0.</summary>
+        /// <summary>介面縮放倍率; 0 表示依畫面高度自動計算 (畫面高 720 為 1 倍, 最小 1 倍). 預設 0.</summary>
         public static float Scale
         {
             get => scale;
@@ -181,6 +187,7 @@ namespace Torben
             {
                 if (!sceneLoaded) return;   // 等 AfterSceneLoad 再建立
                 EnsureInstance();
+                FitToScreen();
                 current.enabled = true;
             }
             else if (current != null)
@@ -213,6 +220,8 @@ namespace Torben
             levelToggleLabels = new GUIContent[levelCount];
             for (int i = 0; i < levelCount; i++)
                 levelToggleLabels[i] = new GUIContent(levelNames[i].Substring(0, 1), levelNames[i]);
+            clearLabel = new GUIContent("Clear", "Clear messages");
+            closeLabel = new GUIContent("X", "Close");
         }
 
         private void OnDestroy()
@@ -233,7 +242,18 @@ namespace Torben
 
             var rect = new Rect(Position, size);
             var moved = GUI.Window(WindowId, rect, drawWindow, "Log");
-            if (draggable && moved.position != rect.position) Position = moved.position;
+            if (draggable && moved.position != rect.position)
+            {
+                Position = moved.position;
+                dragging = true;
+            }
+            // 拖曳結束 (hotControl 釋放) 後的第一個事件才檢查邊界, 不每幀檢查.
+            // 視窗的位移會晚一個事件才由 GUI.Window 回傳, 在放開的當下檢查會被這筆位移蓋掉.
+            if (dragging && GUIUtility.hotControl == 0)
+            {
+                dragging = false;
+                FitToScreen();
+            }
 
             GUI.matrix = oldMatrix;
         }
@@ -249,6 +269,13 @@ namespace Torben
                 bool isOn = GUILayout.Toggle(levelVisible[i], levelToggleLabels[i]);
                 if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
             }
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button(clearLabel))
+            {
+                history.Clear();
+                scroll = Vector2.zero;
+            }
+            if (GUILayout.Button(closeLabel)) DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
             GUILayout.EndHorizontal();
 
             SearchText = GUILayout.TextField(searchText);
@@ -331,16 +358,28 @@ namespace Torben
             return index >= 0 && index < levelCount ? index : 0;
         }
 
-        // 以 96 DPI 為 1 倍; 取不到 DPI 時 (Screen.dpi 為 0) 用 1 倍
+        // 依畫面高度縮放, 讓視窗佔畫面的比例固定, 不受螢幕實體 DPI 與解析度設定影響
         private static float EffectiveScale()
         {
             if (scale > 0f) return scale;
-            float dpi = Screen.dpi;
-            return dpi > 0f ? Mathf.Max(1f, dpi / 96f) : 1f;
+            return Mathf.Max(1f, Screen.height / ReferenceHeight);
         }
 
         private static Vector2 DefaultPosition(float s) =>
-            new Vector2(Screen.width / s - size.x - Margin, Screen.height / s - size.y - Margin);
+            new Vector2(Mathf.Max(0f, Screen.width / s - size.x - Margin), Mathf.Max(0f, Screen.height / s - size.y - Margin));
+
+        // 開啟時與拖曳結束時呼叫: 寬或高超過畫面就改為畫面該方向的一半; 位置超出畫面就拉回邊緣
+        private static void FitToScreen()
+        {
+            float s = EffectiveScale();
+            float screenWidth = Screen.width / s;
+            float screenHeight = Screen.height / s;
+            if (size.x > screenWidth) size.x = screenWidth * 0.5f;
+            if (size.y > screenHeight) size.y = screenHeight * 0.5f;
+            if (!hasCustomPosition) return;    // 預設位置 (右下角) 每次繪製都依畫面重新計算
+            position.x = Mathf.Clamp(position.x, 0f, screenWidth - size.x);
+            position.y = Mathf.Clamp(position.y, 0f, screenHeight - size.y);
+        }
     }
 
 }

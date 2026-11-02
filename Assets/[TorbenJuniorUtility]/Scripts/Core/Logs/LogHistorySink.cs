@@ -26,6 +26,19 @@ namespace Torben
             }
         }
 
+        /// <summary>清空所有紀錄. Version 會遞增, 讓讀取端知道內容已改變.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public void Clear()
+        {
+            lock (gate)
+            {
+                Array.Clear(buffer, 0, buffer.Length);  // 釋放訊息字串的參照
+                head = 0;
+                count = 0;
+                version++;
+            }
+        }
+
         // 把最新的 n 筆依照「舊到新」的順序複製出去，回傳實際複製的筆數
         public int CopyTo(LogEntry[] destination) => CopyTo(destination, out _);
 

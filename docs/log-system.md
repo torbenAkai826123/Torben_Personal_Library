@@ -94,7 +94,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `ResetPosition()` | — | 恢復右下角 |
 | `IsDraggable` | `true` | 是否可拖曳標題列移動視窗 |
 | `AutoScroll` | `true` | 有新訊息時捲到最下方 |
-| `Scale` | `0` | 介面縮放倍率; `0` 表示依 `Screen.dpi / 96` 自動計算 (最小 1 倍, 取不到 DPI 時為 1 倍) |
+| `Scale` | `0` | 介面縮放倍率; `0` 表示依 `Screen.height / 720` 自動計算 (最小 1 倍), 視窗佔畫面的比例固定 |
 | `SearchText` | `""` | 搜尋文字; 比對標籤與訊息, 不分大小寫 |
 | `IsLevelVisible(level)` / `SetLevelVisible(level, bool)` | 全部顯示 | 依等級篩選; 視窗上方 N / W / E / D 開關同步此設定 |
 | `GetLevelColor(level)` / `SetLevelColor(level, hex)` | Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`、Normal 無 | 訊息文字顏色; null 或空字串表示預設文字色 |
@@ -115,7 +115,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 ## 平台
 
 - IMGUI 在所有目標平台都可用, 視窗不限 Editor 或 Development Build。
-- DPI 縮放: **Android 與 iOS 未驗證**; macOS Editor 中的倍率是否合適未確認。
+- 自動縮放依畫面高度計算, 不使用 `Screen.dpi` (實體 DPI 不隨解析度改變, 調低解析度時視窗反而佔更大比例)。不考慮實體尺寸, 小螢幕手機上的字可能偏小。**Android 與 iOS 未驗證**。
 - 沒有內建快捷鍵或手勢; 開關由專案呼叫 `DebugLogs.isGUILog`。
 
 ## 測試
