@@ -70,7 +70,7 @@ namespace Torben
         // 擷取堆疊追蹤的等級 (以 1 << (int)level 為位元). 預設只有 Error
         private static int stackTraceLevels = 1 << (int)LogLevel.Error;
 
-        /// <summary>某個等級的訊息是否擷取堆疊追蹤 (存在 LogEntry.StackTrace). 預設只有 Error 開啟.</summary>
+        /// <summary>某個等級的訊息是否擷取堆疊追蹤 (存在 LogEntry.StackTrace). 預設值見 LogOptions 欄位初始值.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool IsStackTraceEnabled(LogLevel level) => (stackTraceLevels & LevelBit(level)) != 0;
 

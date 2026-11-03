@@ -32,6 +32,7 @@ Assets/[TorbenJuniorUtility]/Scripts/
 ├─ Runtime/    Torben.Runtime.asmdef → Core, 含 StateMachine/ Unity Host
 ├─ Editor/     Torben.Editor.asmdef (僅 Editor)
 ├─ Tests/
+│  ├─ EditMode/  Library.Tests.EditMode.asmdef (僅 Editor, 引用 Core/Runtime/Editor)
 │  └─ PlayMode/  Library.Tests.PlayMode.asmdef
 └─ Samples/
    ├─ Calculator/  Torben.Samples.asmdef (noEngineReferences) → Core

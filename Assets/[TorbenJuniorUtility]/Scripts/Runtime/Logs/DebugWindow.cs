@@ -10,24 +10,25 @@ namespace Torben
     /// </summary>
     public class DebugWindow : MonoBehaviour
     {
-        private const int Capacity = 200;   // Log 與 Unity 訊息各保留的筆數
         private const int WindowId = 0x4C4F47;
         private const float Margin = 10f;
         private const float TitleBarHeight = 18f;
         private const float ReferenceHeight = 720f;   // 自動縮放時, 畫面高 720 為 1 倍
         private const float FoldWidth = 18f;          // 每筆左側展開按鈕的寬度
         private const float BadgeHeight = 16f;        // 合併次數膠囊的高度
+        private const float CheckSize = 14f;          // 第二列核取方塊 (Time / Loc / Collapse / Auto) 的方框大小
         private const float FoldHeight = 14f;         // 展開按鈕的高度
         private static readonly Color separatorColor = new Color(1f, 1f, 1f, 0.12f);   // 列分隔線
         private const float DetailOffset = 2f;        // 第二行與訊息之間多留的距離
 
         private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
         private static readonly int levelCount = levelNames.Length;
-        private static readonly string[] countNumberTexts = new string[Capacity * 2 + 1];  // "n" 快取
 
         // ---- 靜態狀態 ----
         private static LogHistorySink history;
         private static LogHistorySink unityHistory;
+        private static int logCapacity;     // 兩份紀錄的容量, 只在 ResetStatics 時決定
+        private static int unityCapacity;
         private static DebugWindow current;
         private static bool wantVisible;
         private static bool sceneLoaded;    // AfterSceneLoad 之前不建立 GameObject
@@ -47,24 +48,30 @@ namespace Torben
         private static bool showTime;
         private static bool showLocation;
         private static bool collapse;
+        private static DebugWindowButtons visibleButtons;
         private static int filterVersion;       // 篩選條件改變時遞增
         private static int styleVersion;        // 顏色改變時遞增 (需要重組字串)
 
         // ---- 元件狀態 ----
-        private readonly Source logSource = new Source();
-        private readonly Source unitySource = new Source();
-        private readonly int[] visible = new int[Capacity * 2]; // 小於 Capacity 為 logSource 的索引, 否則為 unitySource 的索引 + Capacity
+        // 以下陣列依兩份紀錄的容量配置, 只在紀錄換新 (啟動或重新安裝) 時重新配置, 不在每幀配置
+        private LogHistorySink boundHistory;        // 目前陣列對應的紀錄
+        private LogHistorySink boundUnityHistory;
+        private int boundLogCapacity;               // logSource 的容量, 也是 unitySource 索引的偏移量
+        private Source logSource;
+        private Source unitySource;
+        private int[] visible;              // 小於 boundLogCapacity 為 logSource 的索引, 否則為 unitySource 的索引 + boundLogCapacity
         private int visibleCount;
         // 合併相同訊息用; 索引規則同 visible
-        private readonly int[] order = new int[Capacity * 2];               // 篩選後依先後排序的索引
-        private readonly int[] groupOf = new int[Capacity * 2];             // 每筆所屬的群組
-        private readonly int[] previousOccurrence = new int[Capacity * 2];  // 同群組上一次出現的索引, -1 為沒有
-        private readonly int[] groupLast = new int[Capacity * 2];           // 群組最後一次出現的索引
-        private readonly int[] groupCount = new int[Capacity * 2];
-        private readonly Dictionary<GroupKey, int> groupIds = new Dictionary<GroupKey, int>(Capacity * 2);
+        private int[] order;                // 篩選後依先後排序的索引
+        private int[] groupOf;              // 每筆所屬的群組
+        private int[] previousOccurrence;   // 同群組上一次出現的索引, -1 為沒有
+        private int[] groupLast;            // 群組最後一次出現的索引
+        private int[] groupCount;
+        private Dictionary<GroupKey, int> groupIds;
+        private string[] countNumberTexts;  // "n" (合併次數) 快取
         // 展開狀態: 以流水號記錄, 新訊息進來或篩選改變時不會跑掉
         private readonly HashSet<long> expanded = new HashSet<long>();
-        private readonly bool[] rowExpanded = new bool[Capacity * 2];
+        private bool[] rowExpanded;
         private int pendingToggleRow = -1;  // 按下展開按鈕的列, 下一次 Layout 才套用, 避免同一事件內控制項數量改變
         private bool rowsCollapsed;         // 上次重算可見清單時的合併設定
         private bool drawTime;              // 本次 Layout 的顯示設定
@@ -84,6 +91,9 @@ namespace Torben
         private GUIStyle numberStyle;
         private GUIStyle badgeStyle;        // 合併次數的膠囊標籤
         private Texture2D badgeTexture;
+        private GUIStyle checkStyle;        // 核取方塊的文字 (左側留出方框位置)
+        private Texture2D checkOffTexture;
+        private Texture2D checkOnTexture;
         private GUIContent[] levelToggleLabels;
         private GUIContent sourceBothLabel;     // 來源按鈕: 依目前狀態顯示, 點擊輪替 Unity -> Unity Off -> Both
         private GUIContent sourceUnityLabel;
@@ -102,19 +112,31 @@ namespace Torben
         private bool clearPressed;  // 清除狀態下按住 Clear 中
 
         // 確保尚未進入 Play (未經 DebugLogs.Install) 時存取設定也有預設值
-        static DebugWindow() => ResetStatics();
+        static DebugWindow()
+        {
+            var defaults = new DebugWindowOptions();
+            ResetStatics(defaults.logCapacity, defaults.unityCapacity);
+        }
 
         // ==== 公開設定 ====
 
-        /// <summary>Log 訊息的歷史紀錄 (最多 200 筆). 啟動時建立, 視窗未開啟也會持續記錄. 視窗的 Clear 按鈕只清除這份紀錄.</summary>
+        /// <summary>Log 訊息的歷史紀錄 (最多 LogCapacity 筆). 啟動時建立, 視窗未開啟也會持續記錄. 視窗的 Clear 按鈕只清除這份紀錄.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static LogHistorySink History => history;
 
-        /// <summary>Unity 引擎訊息的歷史紀錄 (最多 200 筆), 由 DebugLogs.isUnityLog 控制是否收集. 視窗的 Clear 按鈕不會清除.</summary>
+        /// <summary>Unity 引擎訊息的歷史紀錄 (最多 UnityCapacity 筆), 由 DebugLogs.isUnityLog 控制是否收集. 視窗的 Clear 按鈕不會清除.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static LogHistorySink UnityHistory => unityHistory;
 
-        /// <summary>視窗大小 (縮放前的單位). 預設 600 x 180, 最小 80 x 60.
+        /// <summary>History 的容量; 由 LogSettings 的 window.logCapacity 在啟動時決定, 執行中不能修改.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static int LogCapacity => logCapacity;
+
+        /// <summary>UnityHistory 的容量; 由 LogSettings 的 window.unityCapacity 在啟動時決定, 執行中不能修改.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static int UnityCapacity => unityCapacity;
+
+        /// <summary>視窗大小 (縮放前的單位). 預設值見 DebugWindowOptions 欄位初始值; 最小 80 x 60.
         /// 開啟視窗時, 寬或高超過畫面的那一邊會改為畫面該方向的一半.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static Vector2 Size
@@ -140,21 +162,25 @@ namespace Torben
         /// <remarks>配置: 零配置.</remarks>
         public static void ResetPosition() => hasCustomPosition = false;
 
-        /// <summary>是否可以拖曳標題列移動視窗. 預設開啟.</summary>
+        /// <summary>目前是否使用預設位置 (右下角); 設定 Position 後為 false, ResetPosition 後為 true.</summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static bool UsesDefaultPosition => !hasCustomPosition;
+
+        /// <summary>是否可以拖曳標題列移動視窗.</summary>
         public static bool IsDraggable
         {
             get => draggable;
             set => draggable = value;
         }
 
-        /// <summary>有新訊息時是否自動捲到最下方; 由關轉開時立即捲到最下方. 預設開啟; 視窗的 Auto 開關同步此設定.</summary>
+        /// <summary>有新訊息時是否自動捲到最下方; 由關轉開時立即捲到最下方. 視窗的 Auto 開關同步此設定.</summary>
         public static bool AutoScroll
         {
             get => autoScroll;
             set => autoScroll = value;
         }
 
-        /// <summary>介面縮放倍率; 0 表示依畫面高度自動計算 (畫面高 720 為 1 倍, 最小 1 倍). 預設 0.</summary>
+        /// <summary>介面縮放倍率; 0 表示依畫面高度自動計算 (畫面高 720 為 1 倍, 最小 1 倍).</summary>
         public static float Scale
         {
             get => scale;
@@ -175,7 +201,7 @@ namespace Torben
             }
         }
 
-        /// <summary>是否顯示 Log 訊息 (經過 Torben.Log 的訊息). 預設開啟; 視窗上方的來源按鈕 (Unity / Unity Off / Both) 同步此設定.</summary>
+        /// <summary>是否顯示 Log 訊息 (經過 Torben.Log 的訊息). 視窗上方的來源按鈕 (Unity / Unity Off / Both) 同步此設定.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool ShowLogMessages
         {
@@ -188,7 +214,7 @@ namespace Torben
             }
         }
 
-        /// <summary>是否顯示 Unity 引擎訊息. 預設開啟; 視窗上方的來源按鈕 (Unity / Unity Off / Both) 同步此設定.</summary>
+        /// <summary>是否顯示 Unity 引擎訊息. 視窗上方的來源按鈕 (Unity / Unity Off / Both) 同步此設定.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool ShowUnityMessages
         {
@@ -201,7 +227,7 @@ namespace Torben
             }
         }
 
-        /// <summary>是否在訊息下方第二行的開頭顯示時間 (當地時間 HH:mm:ss.ff). 預設關閉; 視窗的 Time 開關同步此設定.</summary>
+        /// <summary>是否在訊息下方第二行的開頭顯示時間 (當地時間 HH:mm:ss.ff). 視窗的 Time 開關同步此設定.</summary>
         /// <remarks>配置: 零配置; 每筆第一次顯示時配置字串並快取.</remarks>
         public static bool ShowTime
         {
@@ -211,7 +237,7 @@ namespace Torben
 
         /// <summary>
         /// 是否在訊息下方第二行顯示發生位置 (檔案:行號). Log 訊息為呼叫端位置; Unity 訊息取堆疊中第一個有原始碼位置的框架.
-        /// Editor 中點擊位置會開啟該檔案; 建置版只顯示. 預設關閉; 視窗的 Loc 開關同步此設定.
+        /// Editor 中點擊位置會開啟該檔案; 建置版只顯示. 視窗的 Loc 開關同步此設定.
         /// </summary>
         /// <remarks>配置: 零配置; 每筆第一次顯示時配置字串並快取.</remarks>
         public static bool ShowLocation
@@ -222,7 +248,7 @@ namespace Torben
 
         /// <summary>
         /// 是否合併相同訊息 (等級、分類、內容與呼叫端位置都相同). 合併後顯示在第一次出現的位置 (沿用其流水號), 最右側以膠囊顯示次數,
-        /// 不顯示時間. 只合併仍在紀錄中的訊息 (Log 與 Unity 各最新 200 筆). 預設關閉; 視窗的 Collapse 開關同步此設定.
+        /// 不顯示時間. 只合併仍在紀錄中的訊息 (Log 與 Unity 各自容量內的最新紀錄). 視窗的 Collapse 開關同步此設定.
         /// </summary>
         /// <remarks>配置: 零配置; 內容改變時重新分組 (群組表擴充時才配置).</remarks>
         public static bool Collapse
@@ -236,7 +262,7 @@ namespace Torben
             }
         }
 
-        /// <summary>是否顯示某個等級的訊息. 預設全部顯示.</summary>
+        /// <summary>是否顯示某個等級的訊息.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool IsLevelVisible(LogLevel level) => levelVisible[LevelIndex(level)];
 
@@ -262,39 +288,41 @@ namespace Torben
             styleVersion++;
         }
 
+        /// <summary>
+        /// 視窗上顯示哪些按鈕. 隱藏的只是按鈕, 功能仍可透過對應的靜態屬性控制; 隱藏後版面不留空位.
+        /// 隱藏 Close 時, 觸控裝置上無法用按鈕關閉視窗 (需由程式關閉 DebugLogs.isGUILog).
+        /// </summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static DebugWindowButtons VisibleButtons
+        {
+            get => visibleButtons;
+            set => visibleButtons = value;
+        }
+
         // ==== 安裝與顯示 (由 DebugLogs 呼叫) ====
 
-        // 重設所有靜態狀態並建立新的歷史紀錄 (Log 與 Unity 各一份). 在 SubsystemRegistration 階段由 DebugLogs.Install 呼叫.
-        internal static LogHistorySink ResetStatics()
+        // 重設所有靜態狀態 (設定恢復 DebugWindowOptions 的欄位初始值) 並以指定容量建立新的歷史紀錄 (Log 與 Unity 各一份).
+        // 容量小於 1 時以 1 計. 由 DebugLogs.Install 呼叫.
+        internal static LogHistorySink ResetStatics(int newLogCapacity, int newUnityCapacity)
         {
-            history = new LogHistorySink(Capacity);
-            unityHistory = new LogHistorySink(Capacity);
+            logCapacity = Mathf.Max(1, newLogCapacity);
+            unityCapacity = Mathf.Max(1, newUnityCapacity);
+            history = new LogHistorySink(logCapacity);
+            unityHistory = new LogHistorySink(unityCapacity);
             current = null;
             wantVisible = false;
-            sceneLoaded = false;
 
-            size = new Vector2(600f, 180f);
-            position = Vector2.zero;
-            hasCustomPosition = false;
-            draggable = true;
-            autoScroll = true;
-            scale = 0f;
             searchText = string.Empty;
             levelVisible = new bool[levelCount];
-            for (int i = 0; i < levelCount; i++) levelVisible[i] = true;
-            showLogMessages = true;
-            showUnityMessages = true;
             levelColors = new string[levelCount];
-            levelColors[(int)LogLevel.Warning] = "#FFD54F";
-            levelColors[(int)LogLevel.Error] = "#FF6B6B";
-            levelColors[(int)LogLevel.Debug] = "#9E9E9E";
-            showTime = false;
-            showLocation = false;
-            collapse = false;
             filterVersion = 0;
             styleVersion = 0;
+            new DebugWindowOptions().Apply();
             return history;
         }
+
+        // 進入 Play 時 (SubsystemRegistration) 由 DebugLogs 呼叫: AfterSceneLoad 之前不建立 GameObject
+        internal static void ResetSceneState() => sceneLoaded = false;
 
         // 顯示 / 隱藏. 隱藏時設 enabled = false, OnGUI 完全不會被呼叫.
         internal static void SetVisible(bool isVisible)
@@ -333,6 +361,7 @@ namespace Torben
 
         private void Awake()
         {
+            BindHistories();
             drawWindow = DrawWindow;    // 先快取委派, 避免每幀配置
             levelToggleLabels = new GUIContent[levelCount];
             for (int i = 0; i < levelCount; i++)
@@ -357,6 +386,8 @@ namespace Torben
         private void OnDestroy()
         {
             if (badgeTexture != null) Destroy(badgeTexture);
+            if (checkOffTexture != null) Destroy(checkOffTexture);
+            if (checkOnTexture != null) Destroy(checkOnTexture);
             // CrossObject 被銷毀時一併清掉參照; 下次開啟會重新建立
             if (current == this) current = null;
         }
@@ -398,24 +429,35 @@ namespace Torben
             bool isMouseDown = e.type == EventType.MouseDown && new Rect(Vector2.zero, size).Contains(e.mousePosition);
             Vector2 mouseDownPosition = e.mousePosition;
 
-            GUILayout.BeginHorizontal();
-            for (int i = 0; i < levelCount; i++)
+            // 隱藏的按鈕不佔位置; 第一列的按鈕全部隱藏時整列不畫
+            var buttons = visibleButtons;
+            const DebugWindowButtons firstRow = DebugWindowButtons.Levels | DebugWindowButtons.Source | DebugWindowButtons.Clear | DebugWindowButtons.Close;
+            if ((buttons & firstRow) != 0)
             {
-                bool isOn = GUILayout.Toggle(levelVisible[i], levelToggleLabels[i]);
-                if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
+                GUILayout.BeginHorizontal();
+                if (HasButton(buttons, DebugWindowButtons.Levels))
+                {
+                    for (int i = 0; i < levelCount; i++)
+                    {
+                        bool isOn = GUILayout.Toggle(levelVisible[i], levelToggleLabels[i]);
+                        if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
+                    }
+                }
+                if (HasButton(buttons, DebugWindowButtons.Source)) DrawSourceButton();
+                GUILayout.FlexibleSpace();
+                if (HasButton(buttons, DebugWindowButtons.Clear)) DrawClearButton(isMouseDown, mouseDownPosition);
+                if (HasButton(buttons, DebugWindowButtons.Close) && GUILayout.Button(closeLabel))
+                    DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
+                GUILayout.EndHorizontal();
             }
-            DrawSourceButton();
-            GUILayout.FlexibleSpace();
-            DrawClearButton(isMouseDown, mouseDownPosition);
-            if (GUILayout.Button(closeLabel)) DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
-            GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
-            SearchText = GUILayout.TextField(searchText);
-            ShowTime = GUILayout.Toggle(showTime, timeLabel, GUILayout.ExpandWidth(false));
-            ShowLocation = GUILayout.Toggle(showLocation, locationLabel, GUILayout.ExpandWidth(false));
-            Collapse = GUILayout.Toggle(collapse, collapseLabel, GUILayout.ExpandWidth(false));
-            autoScroll = GUILayout.Toggle(autoScroll, autoScrollLabel, GUILayout.ExpandWidth(false));
+            if (HasButton(buttons, DebugWindowButtons.Search)) SearchText = GUILayout.TextField(searchText);
+            else GUILayout.FlexibleSpace();     // 沒有搜尋框時開關靠右, 與有搜尋框時的位置相同
+            if (HasButton(buttons, DebugWindowButtons.Time)) ShowTime = CheckBox(showTime, timeLabel);
+            if (HasButton(buttons, DebugWindowButtons.Location)) ShowLocation = CheckBox(showLocation, locationLabel);
+            if (HasButton(buttons, DebugWindowButtons.Collapse)) Collapse = CheckBox(collapse, collapseLabel);
+            autoScroll = CheckBox(autoScroll, autoScrollLabel);
             GUILayout.EndHorizontal();
 
             scroll = GUILayout.BeginScrollView(scroll);
@@ -423,6 +465,35 @@ namespace Torben
             GUILayout.EndScrollView();
 
             if (draggable) GUI.DragWindow(new Rect(0f, 0f, 10000f, TitleBarHeight));
+        }
+
+        private static bool HasButton(DebugWindowButtons buttons, DebugWindowButtons button) => (buttons & button) != 0;
+
+        // 依目前的歷史紀錄配置快照與可見清單; 紀錄換新時 (啟動或重新安裝, 容量可能不同) 才重新配置
+        private void BindHistories()
+        {
+            if (boundHistory == history && boundUnityHistory == unityHistory) return;
+            boundHistory = history;
+            boundUnityHistory = unityHistory;
+            boundLogCapacity = logCapacity;
+            int total = logCapacity + unityCapacity;
+            logSource = new Source(logCapacity);
+            unitySource = new Source(unityCapacity);
+            visible = new int[total];
+            visibleCount = 0;
+            order = new int[total];
+            groupOf = new int[total];
+            previousOccurrence = new int[total];
+            groupLast = new int[total];
+            groupCount = new int[total];
+            groupIds = new Dictionary<GroupKey, int>(total);
+            countNumberTexts = new string[total + 1];
+            rowExpanded = new bool[total];
+            expanded.Clear();
+            pendingToggleRow = -1;
+            seenFilterVersion = -1;
+            seenStyleVersion = -1;
+            scroll = Vector2.zero;
         }
 
         private void CreateStyles()
@@ -460,6 +531,28 @@ namespace Torben
             };
             badgeStyle.normal.background = badgeTexture;
             badgeStyle.normal.textColor = Color.white;
+
+            checkOffTexture = CreateCheckTexture(CheckSize, false);
+            checkOnTexture = CreateCheckTexture(CheckSize, true);
+            checkStyle = new GUIStyle(GUI.skin.label) { wordWrap = false, alignment = TextAnchor.MiddleLeft };
+            checkStyle.padding.left = Mathf.CeilToInt(CheckSize) + 4;
+            checkStyle.margin = new RectOffset(6, 2, GUI.skin.textField.margin.top, GUI.skin.textField.margin.bottom);
+            checkStyle.fixedHeight = Mathf.Max(CheckSize, GUI.skin.textField.CalcHeight(GUIContent.none, 100f));   // 與搜尋框同高
+        }
+
+        // 方形核取方塊: 左側畫方框 (開啟時打勾), 右側為文字; 點擊方框或文字都會切換
+        private bool CheckBox(bool value, GUIContent label)
+        {
+            var rect = GUILayoutUtility.GetRect(label, checkStyle, GUILayout.ExpandWidth(false));
+            bool next = GUI.Toggle(rect, value, GUIContent.none, GUIStyle.none);
+            if (Event.current.type != EventType.Repaint) return next;
+            var box = new Rect(rect.x, rect.y + (rect.height - CheckSize) * 0.5f, CheckSize, CheckSize);
+            var oldColor = GUI.color;
+            if (rect.Contains(Event.current.mousePosition)) GUI.color = oldColor * new Color(1.15f, 1.15f, 1.15f, 1f);   // 滑過時稍微變亮
+            GUI.DrawTexture(box, next ? checkOnTexture : checkOffTexture);
+            GUI.color = oldColor;
+            checkStyle.Draw(rect, label, false, false, false, false);
+            return next;
         }
 
         // 高度 height 的元件要以 center 置中時的上邊距
@@ -490,6 +583,52 @@ namespace Torben
             texture.SetPixels32(pixels);
             texture.Apply(false, true);
             return texture;
+        }
+
+        // 核取方塊的方框: 1px 邊框; 開啟時藍底白勾 (兩段線段, 依距離做反鋸齒). 顏色在像素中直接給定
+        private static Texture2D CreateCheckTexture(float boxSize, bool isOn)
+        {
+            int size = Mathf.CeilToInt(boxSize);
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            var border = isOn ? new Color32(74, 144, 226, 255) : new Color32(150, 150, 150, 255);
+            var fill = isOn ? new Color32(74, 144, 226, 255) : new Color32(30, 30, 30, 200);
+            // 勾的三個點 (以方框大小的比例表示, y 向下)
+            var a = new Vector2(0.24f, 0.52f) * size;
+            var b = new Vector2(0.43f, 0.72f) * size;
+            var c = new Vector2(0.78f, 0.30f) * size;
+            float halfWidth = size * 0.08f;
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    bool isBorder = x == 0 || y == 0 || x == size - 1 || y == size - 1;
+                    Color color = isBorder ? border : fill;
+                    if (isOn && !isBorder)
+                    {
+                        var p = new Vector2(x + 0.5f, size - y - 0.5f);   // 貼圖的 y 由下往上
+                        float distance = Mathf.Min(DistanceToSegment(p, a, b), DistanceToSegment(p, b, c));
+                        float weight = Mathf.Clamp01(halfWidth - distance + 0.5f);
+                        color = Color.Lerp(color, Color.white, weight);
+                    }
+                    pixels[y * size + x] = color;
+                }
+            }
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        private static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+        {
+            var ab = b - a;
+            float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+            return Vector2.Distance(p, a + ab * t);
         }
 
         // 一筆 (或合併後的一組) 訊息: 第一行為行號 + 展開按鈕 + 訊息 (+ 合併次數); 第二行為時間與位置; 展開時顯示堆疊追蹤
@@ -573,19 +712,23 @@ namespace Torben
 
         private Source SourceOf(int index, out int i)
         {
-            if (index < Capacity)
+            if (index < boundLogCapacity)
             {
                 i = index;
                 return logSource;
             }
-            i = index - Capacity;
+            i = index - boundLogCapacity;
             return unitySource;
         }
 
         private long SequenceOf(int index) => SourceOf(index, out int i).Sequences[i];
 
+        // 測試用: 上次 Layout 時篩選 (與合併) 後的列
+        internal int VisibleRowCount => visibleCount;
+        internal LogEntry GetVisibleEntry(int row) => SourceOf(visible[row], out int i).Snapshot[i];
+
         // "n" (合併次數)
-        private static string CountNumberText(int count)
+        private string CountNumberText(int count)
         {
             if (count >= countNumberTexts.Length) return count.ToString();
             return countNumberTexts[count] ??= count.ToString();
@@ -647,6 +790,7 @@ namespace Torben
         // 有新訊息時只組新進來的字串; 顏色改變時全部重組; 篩選條件或內容改變時重算可見清單
         private void Refresh()
         {
+            BindHistories();
             // 在快照更新前套用, 列的索引才會對應到上次畫出的內容
             bool expandChanged = pendingToggleRow >= 0;
             if (expandChanged)
@@ -736,7 +880,7 @@ namespace Torben
             {
                 int index = j >= unityCount || (i < logCount && logSource.Sequences[i] < unitySource.Sequences[j])
                     ? i++
-                    : Capacity + j++;
+                    : boundLogCapacity + j++;
                 var source = SourceOf(index, out int n);
                 if (!IsVisible(source.Snapshot[n])) continue;
                 if (!rowsCollapsed)
@@ -805,21 +949,33 @@ namespace Torben
         private static Vector2 DefaultPosition(float s) =>
             new Vector2(Mathf.Max(0f, Screen.width / s - size.x - Margin), Mathf.Max(0f, Screen.height / s - size.y - Margin));
 
-        // 一份歷史紀錄的快照與已格式化字串
+        // 一份歷史紀錄的快照與已格式化字串; 陣列長度為該紀錄的容量
         private sealed class Source
         {
-            public readonly LogEntry[] Snapshot = new LogEntry[Capacity];
-            public readonly long[] Sequences = new long[Capacity];
-            public readonly string[] Lines = new string[Capacity];
+            public readonly LogEntry[] Snapshot;
+            public readonly long[] Sequences;
+            public readonly string[] Lines;
             // 第二行用的快取, 第一次顯示時才組; null 為尚未計算
-            public readonly string[] Times = new string[Capacity];
-            public readonly string[] Numbers = new string[Capacity];        // "[流水號]"
-            public readonly string[] Locations = new string[Capacity];      // "路徑:行號"; 空字串為沒有位置
-            public readonly string[] LocationFiles = new string[Capacity];
-            public readonly int[] LocationLines = new int[Capacity];
+            public readonly string[] Times;
+            public readonly string[] Numbers;        // "[流水號]"
+            public readonly string[] Locations;      // "路徑:行號"; 空字串為沒有位置
+            public readonly string[] LocationFiles;
+            public readonly int[] LocationLines;
             public int Count;
             private int seenVersion;
             private bool hasSnapshot;
+
+            public Source(int capacity)
+            {
+                Snapshot = new LogEntry[capacity];
+                Sequences = new long[capacity];
+                Lines = new string[capacity];
+                Times = new string[capacity];
+                Numbers = new string[capacity];
+                Locations = new string[capacity];
+                LocationFiles = new string[capacity];
+                LocationLines = new int[capacity];
+            }
 
             // 有新訊息時只組新進來的字串, 舊字串直接搬移; restyle 時全部重組.
             // changed: 快照是否更新; 回傳值: 是否有新增或清除 (用於自動捲動)
@@ -902,7 +1058,7 @@ namespace Torben
 
             private void ClearDetails(int from)
             {
-                int length = Capacity - from;
+                int length = Snapshot.Length - from;
                 System.Array.Clear(Times, from, length);
                 System.Array.Clear(Numbers, from, length);
                 System.Array.Clear(Locations, from, length);

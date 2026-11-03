@@ -10,14 +10,16 @@ Log.Information / Warning / Error / Debug   (Core, 純 C#)
         ▼
    sink 清單 (copy-on-write 陣列)
         ├─ DebugLogs         → Unity Console        (Runtime)
-        └─ LogHistorySink    → Log 歷史紀錄 200 筆  (Core) ── DebugWindow.History
+        └─ LogHistorySink    → Log 歷史紀錄 (容量可設定) (Core) ── DebugWindow.History
                                    ▲
                               DebugWindow 依流水號合併兩份紀錄並繪製 (Runtime, IMGUI)
                                    ▼
 Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟時)
-        └─ DebugLogs.OnUnityLog → Unity 歷史紀錄 200 筆 ── DebugWindow.UnityHistory
+        └─ DebugLogs.OnUnityLog → Unity 歷史紀錄 (容量可設定) ── DebugWindow.UnityHistory
                                   (排除 DebugLogs 自己輸出到 Console 的訊息)
 ```
+
+啟動時的初始值由設定檔 `LogSettings` 提供, 見「設定檔」。
 
 | 檔案 | 組件 | 責任 |
 |---|---|---|
@@ -27,14 +29,22 @@ Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟
 | `Scripts/Core/Logs/LogText.cs` | Torben.Core | 顯示用文字轉換: 時間、短路徑、解析 Unity 堆疊位置 |
 | `Scripts/Core/Logs/LogCategory.cs` | Torben.Core | 分類標籤 (`Tag`) 與標籤顏色 (`tagColorHex`) |
 | `Scripts/Core/Logs/LogHistorySink.cs` | Torben.Core | 固定容量環狀緩衝區, 保留最新的 N 筆 |
+| `Scripts/Core/Logs/LogOptions.cs` | Torben.Core | Log 的初始設定 (`LogOptions`) 與等級開關 (`LogLevelSwitch`) |
 | `Scripts/Runtime/Logs/DebugLogs.cs` | Torben.Runtime | Console 輸出; 啟動時安裝 sink; `isGUILog` 開關; 收集 Unity 引擎訊息 |
 | `Scripts/Runtime/Logs/UnityLogCategory.cs` | Torben.Runtime | Unity 引擎訊息的分類 (`[Unity]`) |
 | `Scripts/Runtime/Logs/DebugWindow.cs` | Torben.Runtime | 畫面視窗 (篩選、搜尋、上色、拖曳、縮放) |
+| `Scripts/Runtime/Logs/DebugLogsOptions.cs` | Torben.Runtime | DebugLogs 的初始設定 |
+| `Scripts/Runtime/Logs/DebugWindowOptions.cs` | Torben.Runtime | DebugWindow 的初始設定、`DebugWindowButtons`、`LogLevelColor` |
+| `Scripts/Runtime/Logs/LogSettings.cs` | Torben.Runtime | 設定檔 (`ScriptableObject`); `ResourcesPath` 為預設檔路徑的唯一定義處 |
+| `Resources/TorbenTools/LogSettings.Default.asset` | — | 預設檔 |
+| `Scripts/Editor/Logs/*.cs` | Torben.Editor | Project Settings 頁面、選單、狀態檢查、寫入操作、define 字串處理 |
 | `Scripts/Runtime/StaticObject/CrossObject.cs` | Torben.Runtime | 跨場景物件; DebugWindow 掛在它上面 |
 
 路徑皆相對於 `Assets/[TorbenJuniorUtility]/`。
 
 ## 開關
+
+下表的「預設」為設定檔欄位初始值的現況, 以 `LogSettings` 各欄位的初始值為準; 實際啟動值由設定檔決定。
 
 | 開關 | 預設 | 作用 |
 |---|---|---|
@@ -59,14 +69,51 @@ Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟
 
 | 階段 | 發生的事 |
 |---|---|
-| `SubsystemRegistration` | `DebugLogs.Install`: 清空 sink, 加入 Console 與歷史紀錄兩個 sink; 重設 `isGUILog` 與 DebugWindow 的所有設定; `isUnityLog` 恢復開啟並開始收集 Unity 訊息 |
+| `SubsystemRegistration` | `DebugLogs.Install`: 以 `Resources.Load` 讀取設定檔; 清空 sink, 加入 Console 與歷史紀錄兩個 sink (容量依設定檔); 重設 `isGUILog` 與 DebugWindow 的所有設定; 開始收集 Unity 訊息; 依序套用設定檔的 `log`、`window`、`output` |
 | `BeforeSceneLoad` 之後 | 專案可以修改開關與 DebugWindow 設定 |
-| `AfterSceneLoad` | 若 `isGUILog` 已開啟, 此時才建立視窗元件 (掛在 `CrossObject` 上) |
+| `AfterSceneLoad` | 若 `isGUILog` 已開啟 (含設定檔的 `openWindowOnStart`), 此時才建立視窗元件 (掛在 `CrossObject` 上) |
 | 之後 | 第一次開啟 `isGUILog` 時建立視窗元件; 之後切換只改 `enabled` |
 
 - 在 `SubsystemRegistration` 之前或同階段做的設定會被重設; 請在 `BeforeSceneLoad` 或之後設定。
 - `isPrintLog` 開啟之前呼叫的 Log 不會產生, 也不會補記。要看到載入初期的訊息, 需在更早的階段開啟 `isPrintLog`。
-- 每次進入 Play 都會重設 (包含關閉 Domain Reload 時), 不會殘留上一次的 sink 或設定。
+- 每次進入 Play 都會重設 (包含關閉 Domain Reload 時), 不會殘留上一次的 sink 或設定。`Log.isPrintLog`、`isDebugLog`、堆疊追蹤開關與 `DebugLogs.isConsoleWithGUI` 也會恢復為設定檔的值。
+- 2026-11-03 實測 (Unity 6000.5.5f1, Editor): `SubsystemRegistration` 階段的 `Resources.Load` 讀得到預設檔 (PlayMode 測試 `Startup_LoadsDefaultSettingsFromResources`), 因此安裝維持在此階段, 自訂 sink 的加入時機不變。建置版未驗證。
+
+## 設定檔
+
+`LogSettings` (`ScriptableObject`) 只保存**啟動時的初始值**。執行中的目前狀態仍是 `Log` / `DebugLogs` / `DebugWindow` 的靜態欄位, 熱路徑不讀取設定檔; 在 Play 中修改設定檔要到下次進入 Play 才生效。
+
+### 三層來源
+
+| 順序 | 來源 | 說明 |
+|---|---|---|
+| 1 | 覆蓋檔 | 預設檔的 `projectOverride` 指向的檔案, 屬於遊戲專案, 位置由使用者選擇。**整份取代**預設檔, 不做逐欄位覆蓋; 覆蓋檔自己的 `projectOverride` 不使用 (不支援串接) |
+| 2 | 預設檔 | `Assets/[TorbenJuniorUtility]/Resources/TorbenTools/LogSettings.Default.asset`, 隨函式庫提交 |
+| 3 | 欄位初始值 | 找不到預設檔時用 `ScriptableObject.CreateInstance<LogSettings>()` 的值, 並在 Console 警告一次 (直接用 `UnityEngine.Debug.LogWarning`, 不經過 `Log`)。不拋例外, 行為與加入設定檔之前相同 |
+
+- 預設值只有一份來源: `LogOptions` / `DebugLogsOptions` / `DebugWindowOptions` 的欄位初始值。`DebugWindow` 每次進入 Play 時也以 `DebugWindowOptions` 的初始值重設。
+- **更新函式庫時不要覆蓋 `LogSettings.Default.asset`**: 覆蓋後 `projectOverride` 的連結會遺失。遺失時狀態檢查會提示「可能是更新庫時連結遺失」, 可按「Link」重新連結。
+- 容量 (`window.logCapacity` / `unityCapacity`) 只在啟動時生效, 小於 1 時以 1 計; 大於 `LogSettingsChecker.MaxRecommendedCapacity` (10000) 時狀態檢查會警告。執行中不能修改容量。
+- 等級相關欄位 (堆疊追蹤、等級顏色、等級顯示) 以「等級 + 值」的陣列儲存, Inspector 會顯示等級名稱。沒有列出的等級: 堆疊追蹤視為關閉、顏色為預設文字色、顯示視為開啟; 未定義的等級值會被忽略。
+
+### Editor 工具
+
+不會在載入或匯入期間自動建立檔案, 一律由使用者按按鈕或選單建立。
+
+| 位置 | 功能 |
+|---|---|
+| Project Settings > TorbenTools > Log | 上方顯示狀態檢查的警告與修正按鈕; 預設檔不存在時只顯示「Create Default Settings File」。存在時依區塊顯示: **Files** (預設檔、`projectOverride` 連結、生效的檔案; 右側 Create Project Override、Save Current State、Edit in Inspector 按鈕)、**Build** (Keep Debug Log in Builds 開關與 Standalone / Android / iOS、Build Profile 的狀態)、**Log / Output / Window** (生效檔案內容的唯讀表格)。設定內容不在此頁編輯, 按 Edit in Inspector 到設定檔的 Inspector 修改; 頁面每秒重新檢查一次 |
+| 設定檔的 Inspector | `LogSettingsInspector`: Log / Output / Window 為 Unity 預設的折疊欄位, 區塊內 bool 在上、其他欄位在下 (依欄位宣告順序)。`projectOverride` 只在預設檔顯示。等級顏色以 `LogLevelColorDrawer` 顯示: 等級 + 自訂開關 + Color picker (關閉時為預設文字顏色, 存空字串; 開啟時存 `#RRGGBB`, 透明時 `#RRGGBBAA`)。右上角 Save Current State 只在 Play 中、且此檔為生效的檔案時可用。以 `SerializedObject` 編輯, Cmd / Ctrl+Z 可復原 |
+| `TorbenTools/Log GUI Window` | 切換 `DebugLogs.isGUILog`; 只在 Play 中可用, 開啟時打勾 |
+| `TorbenTools/Log/Settings...` | 開啟上述設定頁 |
+| `TorbenTools/Log/Keep Debug Log in Builds` | 在目前建置平台的 Player Settings 加入 / 移除 `TORBEN_LOG_DEBUG` (建置版保留 `Log.Debug`); 打勾表示已定義。變更後 Unity 會重新編譯 |
+| `TorbenTools/Log/Save Current State as Settings` | 只在 Play 中可用; 讀取目前狀態, 確認目標路徑後寫入目前生效的檔案 (有覆蓋檔寫覆蓋檔, 否則寫預設檔), 支援 Undo |
+| `TorbenTools/Log/Create Project Override` | 選擇位置, 複製預設檔內容建立覆蓋檔並連結。位置在 `Assets/[TorbenJuniorUtility]/` 底下時警告 (覆蓋檔應屬於遊戲專案), 可選擇繼續 |
+| `TorbenTools/Log/Check Settings` | 執行狀態檢查, 結果輸出到 Console |
+
+狀態檢查 (`LogSettingsChecker`) 的項目: 1. 預設檔是否存在 (警告, 附「Create」); 2. 有其他 `LogSettings` 但預設檔沒有指向它 (警告, 附「Link」); 3. 覆蓋檔自己也設定了 `projectOverride` (警告, 附「Clear」); 4. 生效檔案的容量小於 1 (錯誤) 或大於上限 (警告); 5. Standalone / Android / iOS 的 `TORBEN_LOG_DEBUG` (資訊); 6. 目前 Build Profile 自己的 define 是否有 `TORBEN_LOG_DEBUG` (資訊, 以 `BuildProfile.GetActiveBuildProfile().scriptingDefines` 讀取; 沒有使用 Build Profile 時不列出)。**Build Profile 的 define 不受 Keep Debug Log in Builds 管理**, 需在 Build Profile 視窗自行設定。
+
+進入 Play 時, 若 1 以外的項目有警告以上, 會在 Console 輸出一次摘要 (找不到預設檔時已由 `DebugLogs.Install` 警告, 不重複輸出)。
 
 ## Log API (`Torben.Log`)
 
@@ -156,16 +203,18 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 
 ## DebugWindow API
 
-所有設定都是靜態的, 視窗建立前就可以設定; 每次進入 Play 時恢復預設值。
+所有設定都是靜態的, 視窗建立前就可以設定; 每次進入 Play 時恢復為設定檔的值。下表「預設」為 `DebugWindowOptions` 欄位初始值的現況, 以原始碼為準。
 
 | 成員 | 預設 | 說明 |
 |---|---|---|
-| `History` | — | Log 訊息的歷史紀錄 (`LogHistorySink`, 最多 200 筆); Clear 按鈕只清這份 |
-| `UnityHistory` | — | Unity 引擎訊息的歷史紀錄 (最多 200 筆); Clear 按鈕不清 |
+| `History` | — | Log 訊息的歷史紀錄 (`LogHistorySink`, 最多 `LogCapacity` 筆); Clear 按鈕只清這份 |
+| `UnityHistory` | — | Unity 引擎訊息的歷史紀錄 (最多 `UnityCapacity` 筆); Clear 按鈕不清 |
+| `LogCapacity` / `UnityCapacity` | 200 / 200 | 兩份紀錄的容量, 唯讀; 由設定檔在啟動時決定 |
 | `ShowLogMessages` / `ShowUnityMessages` | `true` | 依來源篩選; 視窗上方的來源按鈕同步此設定, 點擊輪替 Unity (只顯示 Unity) → Unity Off (只顯示 Log) → Both (全部)。兩者都關時按鈕顯示 None, 點擊回到 Both |
 | `Size` | 600 × 180 | 視窗大小 (縮放前單位); 最小 80 × 60 |
 | `Position` | 右下角 | 視窗左上角位置; 設定後不再自動貼齊右下角, 拖曳也會更新 |
 | `ResetPosition()` | — | 恢復右下角 |
+| `UsesDefaultPosition` | `true` | 目前是否使用右下角預設位置 (唯讀) |
 | `IsDraggable` | `true` | 是否可拖曳標題列移動視窗 |
 | `AutoScroll` | `true` | 有新訊息時捲到最下方; 由關轉開時立即捲到最下方; 視窗的 Auto 開關同步此設定 |
 | `Scale` | `0` | 介面縮放倍率; `0` 表示依 `Screen.height / 720` 自動計算 (最小 1 倍), 視窗佔畫面的比例固定 |
@@ -176,18 +225,19 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `ShowLocation` | `false` | 在第二行顯示發生位置 `檔案:行號`; Log 訊息為呼叫端, Unity 訊息取堆疊中第一個有原始碼位置的框架; 視窗的 Loc 開關同步此設定 |
 | `Collapse` | `false` | 合併相同訊息; 視窗的 Collapse 開關同步此設定 |
 | `GetLevelColor(level)` / `SetLevelColor(level, hex)` | Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`、Normal 無 | 訊息文字顏色; null 或空字串表示預設文字色 |
+| `VisibleButtons` | `All` | 顯示哪些按鈕 (`DebugWindowButtons`: Levels、Source、Clear、Close、Search、Time、Location、Collapse)。隱藏的只是按鈕, 功能仍可透過靜態屬性控制; 隱藏後不留空位, 第一列全部隱藏時整列不畫, 沒有搜尋框時第二列的開關靠右。`Auto` 開關不在旗標內, 一律顯示。隱藏 `Close` 時觸控裝置上無法用按鈕關閉視窗 |
 
 ### 視窗操作
 
-- 上方一列: N / W / E / D 等級開關、Log / Unity 來源開關、`Clear`、`X`; 第二列: 搜尋框、`Time`、`Loc`、`Collapse`、`Auto` 開關; 下方為捲動清單。
+- 上方一列: N / W / E / D 等級開關、Log / Unity 來源開關、`Clear`、`X`; 第二列: 搜尋框、`Time`、`Loc`、`Collapse`、`Auto` 方形核取方塊 (自繪貼圖, 開啟時藍底白勾, 滑過時變亮; 點擊方框或文字都會切換); 下方為捲動清單。
 - 每筆最左側為行號 `[n]`: 該筆的流水號 (`LogHistorySink` 共用, 依寫入順序遞增)。同一筆的號碼固定, 不因舊紀錄被擠掉或篩選而改變; 被篩掉或屬於另一份紀錄的號碼會留空缺。欄寬依目前最大的號碼位數決定 (最少 3 位)。
 - 行號右邊為 `+` / `-` 展開按鈕, 展開後以小一級的字顯示堆疊追蹤; 沒有堆疊追蹤時按鈕呈現無法使用。
 - 行號、展開按鈕、次數膠囊都以訊息第一行文字的中線垂直置中 (依字型實際行高計算)。
 - 列與列之間有 1px 分隔線, 也當作檢查對齊的參考線。
 - `Time` / `Loc` 開啟時, 訊息下方多一行小字 (與訊息間多留 2px): `(時間)  路徑:行號`。Editor 中點擊路徑會開啟該檔案 (專案內的檔案用 `AssetDatabase.OpenAsset`, 與 Console 相同); 建置版只顯示。
-- `Collapse`: 等級、分類 (同一實例)、內容與呼叫端位置都相同的訊息合併成一列, 顯示在第一次出現的位置並沿用其流水號 (同 Unity Console), 最右側以膠囊標籤顯示次數; 合併多次的列不顯示時間。只合併仍在紀錄中的訊息 (兩份紀錄各最新 200 筆), 被擠掉的不計入次數。
+- `Collapse`: 等級、分類 (同一實例)、內容與呼叫端位置都相同的訊息合併成一列, 顯示在第一次出現的位置並沿用其流水號 (同 Unity Console), 最右側以膠囊標籤顯示次數; 合併多次的列不顯示時間。只合併仍在紀錄中的訊息 (兩份紀錄各自容量內的最新紀錄), 被擠掉的不計入次數。
 - 兩份紀錄依寫入順序 (`LogHistorySink` 共用的流水號) 合併顯示; 來源、等級、搜尋三種篩選同時套用。
-- `Clear` 只清 Log 訊息, Unity 訊息保留 (避免重要的引擎錯誤一起被刪)。Unity 訊息只會因超過 200 筆被擠掉或重新進入 Play 而消失。
+- `Clear` 只清 Log 訊息, Unity 訊息保留 (避免重要的引擎錯誤一起被刪)。Unity 訊息只會因超過容量被擠掉或重新進入 Play 而消失。
 - `Clear` 為兩段式確認: 第一次點擊進入清除狀態 (按鈕變黃), 再點一次才清除 (按住時紅色); 在視窗其他位置按下滑鼠即取消。
 - `X` 等同 `DebugLogs.isGUILog = false`, 一併恢復 Console 輸出。
 - 開啟視窗與拖曳結束時: 寬或高超過畫面時改為畫面該方向的一半; 自訂位置超出畫面時拉回邊緣。
@@ -201,6 +251,8 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `FoldWidth` | `18f` | 展開按鈕寬度; 第二行與堆疊追蹤的縮排也依此計算 |
 | `FoldHeight` | `14f` | 展開按鈕高度; 改了仍會自動置中 |
 | `BadgeHeight` | `16f` | 次數膠囊高度; 膠囊貼圖與左右圓角半徑依此產生 |
+| `CheckSize` | `14f` | 第二列核取方塊的方框大小; 貼圖依此產生 |
+| `CreateCheckTexture()` 的像素顏色 | 邊框 `(150, 150, 150)`、底 `(30, 30, 30, 200)`; 開啟時 `(74, 144, 226)` 與白勾 | 核取方塊外觀 |
 | `DetailOffset` | `2f` | 第二行 (時間、位置) 與訊息之間多留的距離 |
 | `separatorColor` | 白色, 透明度 `0.12f` | 列分隔線顏色 |
 | `CreateStyles()` 的 `textCenter` | `padding.top + lineHeight / 2` | 三個小元件的置中基準; 整體偏高或偏低時在這裡加減幾 px, 三者一起移動 |
@@ -235,6 +287,11 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `dotnet/Library.Tests/LogTests.cs` | dotnet | 多 sink、重複加入、移除、`HasSink`、`isDebugLog`、`isPrintLog`、`IsEnabled`、`Format` (4 個等級、有 / 無分類、關閉時不格式化參數)、`Log.Debug` 的 `[Conditional]` symbol、公開寫入方法只有 10 個、`SystemCategory` 標籤 |
 | `dotnet/Library.Tests/LogEntryInfoTests.cs` | dotnet | 呼叫端位置 (含 `Format` 與 3 個字串參數的多載選擇)、UTC 時間、堆疊追蹤預設值與開關、堆疊從呼叫端開始、`LogText` 的時間 / 路徑 / Unity 位置解析 |
 | `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號、`Clear`、容量小於 1 時丟例外、流水號遞增且跨紀錄共用 |
+| `dotnet/Library.Tests/LogOptionsTests.cs` | dotnet | `LogOptions` 欄位初始值、`Apply` / `Capture` 往返、堆疊追蹤開關對應、未定義 / 缺少 / 重複等級與 null 時不拋例外 |
+| `Scripts/Tests/PlayMode/LogSettingsInstallTests.cs` | PlayMode | 啟動時從 Resources 讀到預設檔; 沒有設定檔時與修改前相同且只警告一次; 套用預設檔; 覆蓋檔整份取代; `openWindowOnStart`; `DebugWindowOptions.Capture`; 容量 5 與 7 時兩份紀錄、合併順序、來源 / 搜尋篩選與 Collapse 正確; 隱藏按鈕後繪製不出錯 |
+| `Scripts/Tests/EditMode/ScriptingDefineUtilityTests.cs` | EditMode | define 字串的判斷 / 新增 / 移除 (null、空字串、前後空白、重複、大小寫) |
+| `Scripts/Tests/EditMode/LogLevelColorDrawerTests.cs` | EditMode | Color picker 與色碼互轉 (不透明 / 透明、空字串、無法解析、預設顏色往返) |
+| `Scripts/Tests/EditMode/LogSettingsCheckerTests.cs` | EditMode | 狀態檢查 1～4 (暫存 asset, TearDown 刪除)、Link 修正、預設檔路徑與 Resources 讀到同一個檔案、函式庫資料夾判斷 |
 | `Scripts/Tests/PlayMode/DebugWindowTests.cs` | PlayMode | 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置、Unity 訊息收集 / 不重複收自己的 Log / `isUnityLog` 關閉 / 不受 `isPrintLog` 影響、清 Log 不影響 Unity、來源篩選設定、顯示設定 (Time / Loc / Collapse) 讀寫、Log 紀錄帶時間與呼叫端、Unity 訊息帶時間與堆疊位置、開啟所有顯示選項時繪製不出錯 |
 
-執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋、Log / Unity 合併順序與開關、展開按鈕、第二行字體大小、點擊路徑開檔、合併次數) 需在 Play 時人工確認。
+執行方式見 [dotnet 測試手冊](dotnet-test.md) 與 [Unity CLI 手冊](unity-cli-pipeline.md)。視窗的實際畫面 (版面、拖曳、搜尋、Log / Unity 合併順序與開關、展開按鈕、第二行字體大小、點擊路徑開檔、合併次數) 需在 Play 時人工確認。設定頁的顯示與 Undo、選單勾選狀態、`Log GUI Window` 切換、Create Project Override 流程、Save Current State 的對話框也需人工確認。

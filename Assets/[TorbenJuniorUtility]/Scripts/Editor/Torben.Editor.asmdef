@@ -2,7 +2,8 @@
     "name": "Torben.Editor",
     "rootNamespace": "",
     "references": [
-        "Torben.Core"
+        "Torben.Core",
+        "Torben.Runtime"
     ],
     "includePlatforms": [
         "Editor"

@@ -85,12 +85,13 @@ TextMeshPro 動態字型 (`SDF.asset`) 的變動是 Editor 顯示文字時自動
 - 註解中文：半形標點 + 空格（避免混用全形標點）。 
 - 委派點：Runtime 中需在 Inspector 設定的事件，優先用 `UnityEvent`（含泛型）＋ lambda；Core 與熱路徑使用 `System.Action`／`System.Func` 或自訂 delegate。
 - 必須用 `System` 時寫完整名，勿單獨 `using System;`（Core 不受此限）。
+- XML 註解不寫死預設數值 (例如「預設 600 x 180」)，改寫「預設值見 `XxxOptions` 欄位初始值」，讓預設值只有欄位初始值一份來源。
 
 ## 函式庫架構
 
 - Core：純 C#，位於 `Scripts/Core/`，不得引用 `UnityEngine`／`UnityEditor`；以 `dotnet test` 測試（見 `docs/dotnet-test.md`）。
 - Runtime：只放必須使用 Unity API 的部分，盡量精簡；主要以 PlayMode 測試。
-- Editor：Editor 專用工具。
+- Editor：Editor 專用工具。選單放在 `TorbenTools/{系統名稱}/` 底下 (例如 `TorbenTools/Log/Settings...`)；常用開關可放在 `TorbenTools/` 同層，用 `priority` 排在子選單前面。Project Settings 頁面用 `Project/TorbenTools/{系統名稱}`。
 - 新功能先判斷能否放進 Core，不行才放 Runtime。
 - dotnet 測試只驗證邏輯正確性；GC 與效能數字以 Unity Performance Testing 為準。
 - 依賴方向：Samples 可引用函式庫；函式庫 (含其測試組件) 不得引用 Samples。

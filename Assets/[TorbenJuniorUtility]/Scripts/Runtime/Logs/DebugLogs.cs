@@ -24,12 +24,12 @@ namespace Torben
         }
         private static bool guiLog = false;
 
-        /// <summary>isGUILog 開啟時, 是否仍同時輸出到 Console. (預設關閉, 避免系統訊息蓋過自己的訊息)</summary>
+        /// <summary>isGUILog 開啟時, 是否仍同時輸出到 Console (關閉可避免系統訊息蓋過自己的訊息). 預設值見 DebugLogsOptions 欄位初始值.</summary>
         public static bool isConsoleWithGUI = false;
 
         /// <summary>
         /// 是否把 Unity 引擎訊息 (未捕捉的例外、引擎警告、直接呼叫 UnityEngine.Debug.Log 的訊息) 收集到 DebugWindow.UnityHistory.
-        /// 不受 Log.isPrintLog 影響; 預設開啟, 每次進入 Play 時恢復開啟. 關閉期間的訊息不會補記.
+        /// 不受 Log.isPrintLog 影響; 每次進入 Play 時恢復為設定檔的值 (預設值見 DebugLogsOptions 欄位初始值). 關閉期間的訊息不會補記.
         /// </summary>
         /// <remarks>配置: 零配置 (訊息字串由 Unity 提供).</remarks>
         public static bool isUnityLog
@@ -95,18 +95,41 @@ namespace Torben
         // 離開 Play (Editor) 或結束程式時取消訂閱, 避免在 Edit 模式繼續收集
         private static void OnQuitting() => Application.logMessageReceivedThreaded -= OnUnityLog;
 
-        // 遊戲啟動時 (最早的載入階段) 重設狀態, 加入 Console 與畫面視窗的歷史紀錄兩個 sink, 並開始收集 Unity 引擎訊息.
-        // 在這之後才寫的 Log 都會被歷史紀錄保留, 視窗晚點開啟也看得到.
+        // 啟動時從 Resources 讀到的預設檔; 找不到時為 null
+        internal static LogSettings StartupSettings { get; private set; }
+
+        // 遊戲啟動時 (最早的載入階段) 讀取設定檔並安裝. 在這之後才寫的 Log 都會被歷史紀錄保留, 視窗晚點開啟也看得到.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void Install()
+        private static void InstallOnLoad()
+        {
+            DebugWindow.ResetSceneState();
+            StartupSettings = Resources.Load<LogSettings>(LogSettings.ResourcesPath);
+            Install(StartupSettings);
+        }
+
+        // 重設狀態, 加入 Console 與畫面視窗的歷史紀錄兩個 sink, 套用設定檔, 並開始收集 Unity 引擎訊息.
+        // settings 為預設檔 (有 projectOverride 時改用它); null 時以欄位初始值運作並警告一次.
+        internal static void Install(LogSettings settings)
         {
             guiLog = false;
             Log.ClearSinks();   // 關閉 Domain Reload 時靜態狀態會保留, 先清掉避免重複加入
+
+            LogSettings effective = settings != null ? settings.ResolveEffective() : null;
+            LogSettings defaults = null;
+            if (effective == null) effective = defaults = ScriptableObject.CreateInstance<LogSettings>();
+            var window = effective.window ?? new DebugWindowOptions();
+
             Log.AddSink(new DebugLogs());
-            Log.AddSink(DebugWindow.ResetStatics());
+            Log.AddSink(DebugWindow.ResetStatics(window.logCapacity, window.unityCapacity));
             isUnityLog = true;  // 先取消再訂閱, 關閉 Domain Reload 時也不會重複
+            effective.Apply();
             Application.quitting -= OnQuitting;
             Application.quitting += OnQuitting;
+
+            if (defaults == null) return;
+            Object.Destroy(defaults);
+            // 不經過 Log: 此時 Log 的設定剛套用, 避免順序問題
+            Debug.LogWarning($"[Log] LogSettings not found at Resources/{LogSettings.ResourcesPath}; using default values. Create it from Project Settings > TorbenTools > Log.");
         }
     }
 

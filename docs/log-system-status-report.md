@@ -1,7 +1,7 @@
 # Log 系統現況報告 (給設計用 AI)
 
 - 對象: 負責後續設計 Log 系統的 AI。假設讀者看不到原始碼, 本文已附上必要的型別定義。
-- 基準: 提交 `5207f04` (2026-11-03), 分支 `main`。含 2026-11-02 的問題修正 (第 7 節)、Unity 引擎訊息收集, 2026-11-03 的時間 / 呼叫端位置 / 堆疊追蹤與視窗顯示 (第 7.1 節), 以及同日的寫入方法精簡 (第 7.2 節)。
+- 基準: 提交 `5207f04` (2026-11-03), 分支 `main`。含 2026-11-02 的問題修正 (第 7 節)、Unity 引擎訊息收集, 2026-11-03 的時間 / 呼叫端位置 / 堆疊追蹤與視窗顯示 (第 7.1 節), 以及同日的寫入方法精簡 (第 7.2 節) 與設定檔 / Editor 工具 (第 7.3 節, 尚未提交)。
 - 權威說明: [`docs/log-system.md`](log-system.md) (行為與 API); 本報告補上資料結構全貌、限制、缺口與已知問題。兩者衝突時以原始碼為準。
 
 ---
@@ -42,6 +42,8 @@
 | 堆疊追蹤 (依等級開關, 預設 Error) | 完成 | Core `LogStackTrace`、`Log.SetStackTraceEnabled` |
 | Unity Console 輸出 | 完成 | Runtime `DebugLogs` |
 | 啟動時自動安裝 sink | 完成 | Runtime `DebugLogs.Install` |
+| 設定檔 (預設檔 + 遊戲專案覆蓋檔, 啟動時套用一次) | 完成 | Core `LogOptions`; Runtime `LogSettings`、`DebugLogsOptions`、`DebugWindowOptions` |
+| 歷史紀錄容量可設定 (Log / Unity 各自) | 完成 (只在啟動時生效) | `DebugWindowOptions.logCapacity` / `unityCapacity` |
 | 畫面視窗 (IMGUI) | 完成 | Runtime `DebugWindow` |
 | ├ 等級篩選 (N/W/E/D)、搜尋 | 完成 | |
 | ├ 行號、展開按鈕 (堆疊追蹤)、列分隔線 | 完成 | |
@@ -51,13 +53,14 @@
 | ├ 拖曳、超出畫面時拉回、尺寸過大時縮為半個畫面 | 完成 | |
 | ├ 依畫面高度自動縮放 | 完成 (行動平台未驗證) | |
 | ├ Clear (兩段式確認)、Close 按鈕 | 完成 | |
-| └ 自動捲到最下方 | 完成 | |
+| ├ 自動捲到最下方 | 完成 | |
+| └ 隱藏個別按鈕 | 完成 | `DebugWindow.VisibleButtons` |
 | Unity 引擎訊息收集 (獨立開關 `isUnityLog`, 預設開) | 完成 | Runtime `DebugLogs`、`UnityLogCategory` |
 | ├ 視窗 Log / Unity 來源篩選 | 完成 | `DebugWindow.ShowLogMessages` / `ShowUnityMessages` |
 | └ Clear 只清 Log, 保留 Unity 訊息 | 完成 | |
 | 跨場景宿主 | 完成 | Runtime `CrossObject` |
 | Console 點兩下跳到呼叫端 | **未解決** (`HideInCallstack` 不適用, 見 7.1) | — |
-| Editor 工具 | 無 | — |
+| Editor 工具 (Project Settings 頁面、`TorbenTools/` 選單、狀態檢查) | 完成 (畫面與操作待人工確認) | Editor `Scripts/Editor/Logs/` |
 | Android / iOS 實機 | **未驗證** | — |
 
 ---
@@ -276,15 +279,15 @@ Unity 訊息的等級對應: `Warning` → Warning; `Error` / `Assert` / `Except
 
 Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下仍跳到 `DebugLogs.Write`。`Application.quitting` 時取消訂閱。
 
-安裝 (`[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]`): 重設 `isGUILog`、`Log.ClearSinks()`、加入 `new DebugLogs()` 與 `DebugWindow.ResetStatics()` 回傳的歷史紀錄。進入 Play 都會重設 (含關閉 Domain Reload)。**注意**: 會清掉使用者在更早階段加入的自訂 sink, 自訂 sink 必須在 `BeforeSceneLoad` 之後加入。
+安裝 (`[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]`): `Resources.Load<LogSettings>(LogSettings.ResourcesPath)` 讀取預設檔 (有 `projectOverride` 時改用覆蓋檔, 找不到時用 `CreateInstance` 的欄位初始值並以 `UnityEngine.Debug.LogWarning` 警告一次), 重設 `isGUILog`、`Log.ClearSinks()`、加入 `new DebugLogs()` 與 `DebugWindow.ResetStatics(logCapacity, unityCapacity)` 回傳的歷史紀錄, 再依序套用 `log`、`window`、`output`。此階段讀得到 Resources (2026-11-03 Editor 實測), 安裝維持在 `SubsystemRegistration`。測試用的 `internal Install(LogSettings)` 以 `InternalsVisibleTo` 開放給 `Library.Tests.PlayMode`。進入 Play 都會重設 (含關閉 Domain Reload)。**注意**: 會清掉使用者在更早階段加入的自訂 sink, 自訂 sink 必須在 `BeforeSceneLoad` 之後加入。
 
 ### 5.2 `DebugWindow` (畫面視窗, `MonoBehaviour`)
 
-- 兩份歷史紀錄: `History` (Log) 與 `UnityHistory` (Unity), 各 200 筆。`ShowLogMessages` / `ShowUnityMessages` 依來源篩選 (預設都開)。
-- 常數: 容量 `200` (每份, 不可設定)、`WindowId 0x4C4F47`、邊距 `10`、標題列高 `18`、參考高度 `720`。
-- 靜態設定 (視窗建立前就能設定, 進入 Play 時重設): `History`、`Size` (預設 600×180, 最小 80×60)、`Position` / `ResetPosition()`、`IsDraggable`、`AutoScroll`、`Scale` (0 = `max(1, Screen.height / 720)`)、`SearchText`、`IsLevelVisible` / `SetLevelVisible`、`GetLevelColor` / `SetLevelColor` (預設 Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`)、`ShowTime` / `ShowLocation` / `Collapse` (預設皆 `false`)。
-- 內部快取: 每份紀錄一個 `Source` (`Snapshot`、`Sequences`、`Lines` 各 200), `visible[400]` (篩選後索引, Unity 的索引加 200 區分)。以 `Version` / `filterVersion` / `styleVersion` 三個版本號決定是否重組字串或重算篩選; 只在 `EventType.Layout` 更新資料。
-- 介面: 上方一列 N/W/E/D 開關 + Log/Unity 開關 + `Clear` + `X`; 第二列搜尋框 + `Time` / `Loc` / `Collapse` 開關; 捲動清單。
+- 兩份歷史紀錄: `History` (Log) 與 `UnityHistory` (Unity), 容量由設定檔決定 (`LogCapacity` / `UnityCapacity`, 欄位初始值各 200)。`ShowLogMessages` / `ShowUnityMessages` 依來源篩選 (預設都開)。
+- 常數: `WindowId 0x4C4F47`、邊距 `10`、標題列高 `18`、參考高度 `720`。
+- 靜態設定 (視窗建立前就能設定, 進入 Play 時以 `DebugWindowOptions` 欄位初始值重設後套用設定檔): `VisibleButtons`、`UsesDefaultPosition`、`History`、`Size` (預設 600×180, 最小 80×60)、`Position` / `ResetPosition()`、`IsDraggable`、`AutoScroll`、`Scale` (0 = `max(1, Screen.height / 720)`)、`SearchText`、`IsLevelVisible` / `SetLevelVisible`、`GetLevelColor` / `SetLevelColor` (預設 Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`)、`ShowTime` / `ShowLocation` / `Collapse` (預設皆 `false`)。
+- 內部快取: 每份紀錄一個 `Source` (`Snapshot`、`Sequences`、`Lines` 長度為該紀錄的容量), `visible[logCapacity + unityCapacity]` (篩選後索引, Unity 的索引加 `logCapacity` 區分)。陣列在元件建立或歷史紀錄換新時配置 (`BindHistories`), 不在每幀配置。以 `Version` / `filterVersion` / `styleVersion` 三個版本號決定是否重組字串或重算篩選; 只在 `EventType.Layout` 更新資料。
+- 介面: 上方一列 N/W/E/D 開關 + Log/Unity 開關 + `Clear` + `X`; 第二列搜尋框 + `Time` / `Loc` / `Collapse` / `Auto` 方形核取方塊 (`CheckBox`: 執行期產生 14×14 方框貼圖, 開啟時打勾, 元件銷毀時釋放); 捲動清單。
 - 每一列 (`DrawRow`):
   - 第一行: 行號 `[n]` (不合併時在清單中的順序, 套用篩選後) + `+` / `-` 展開按鈕 (沒有堆疊追蹤時 `GUI.enabled = false`) + 訊息 + 合併次數膠囊 (次數 > 1 才顯示, 最右側)。行號、按鈕、膠囊以訊息第一行文字中線置中 (`lineStyle.padding.top + lineHeight / 2`)。
   - 第二行 (`Time` 或 `Loc` 開啟時, 與訊息間多 2px, 字比主訊息小 2 點): `(HH:mm:ss.ff)` + `路徑:行號`。Log 訊息用呼叫端位置; Unity 訊息用 `LogText.TryParseUnityLocation`。Editor 中位置是按鈕, 以 `AssetDatabase.OpenAsset(asset, line)` 開啟, 找不到資源時改用 `InternalEditorUtility.OpenFileAtLineExternal`; 建置版只顯示。專案根 (`Application.dataPath` 的上一層) 只在 Editor 取得。
@@ -310,7 +313,9 @@ Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下
 | 測試 | 數量 | 本次結果 |
 |---|---|---|
 | dotnet `LogTests` + `LogHistorySinkTests` + `LogEntryInfoTests` | 61 (58 → 61, 7.2 新增 3 個) | **通過** (2026-11-03 `dotnet test dotnet/Library.Tests/Library.Tests.csproj`, 整體 111/111) |
-| PlayMode `DebugWindowTests` | 22 | **通過** (2026-11-03 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 29/29; EditMode 8/8) |
+| dotnet `LogOptionsTests` | 5 | **通過** (2026-11-03 `dotnet test dotnet/TorbenJunior.sln`, Library.Tests 116/116、Samples.Tests 8/8) |
+| PlayMode `DebugWindowTests` + `LogSettingsInstallTests` | 22 + 8 | **通過** (2026-11-03 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 37/37) |
+| EditMode `ScriptingDefineUtilityTests` + `LogSettingsCheckerTests` + `LogLevelColorDrawerTests` | 38 | **通過** (2026-11-03 `unity command test run --mode editor`, 全部 EditMode 46/46) |
 
 dotnet `LogTests` 另含 `Format` 4 個等級 / 有無分類 / 關閉時不格式化、`Log.Debug` 的 3 個 `ConditionalAttribute`、公開寫入方法只有 10 個 (反射, 只在測試中使用)。測試專案在 `DefineConstants` 加入 `TORBEN_LOG_DEBUG`, 否則測試中的 `Log.Debug` 會被移除。
 
@@ -362,6 +367,20 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 | 測試 | dotnet 測試專案加 `TORBEN_LOG_DEBUG`; 新增 `Format` 4 個等級、`Conditional` symbol、10 個寫入方法的測試 |
 | 規則 | `AGENTS.md` 新增「Log 使用規則」 |
 
+### 7.3 2026-11-03 設定檔與 Editor 工具
+
+| 項目 | 處理 |
+|---|---|
+| 設定檔 | 新增 `LogSettings` (`ScriptableObject`) 與三組 `[Serializable]` 設定 (`LogOptions` 在 Core, `DebugLogsOptions` / `DebugWindowOptions` 在 Runtime)。只在 `Install` 套用一次, 熱路徑不讀取。覆蓋檔整份取代, 不支援串接 |
+| 預設值來源 | 欄位初始值為唯一來源; `DebugWindow.ResetStatics` 改為套用 `new DebugWindowOptions()`。XML 註解中寫死的預設數值改為「預設值見 ... 欄位初始值」 |
+| 容量 | 常數 200 移除; `visible` 等陣列的偏移量改為 `logCapacity`, 長度為兩個容量總和 |
+| 按鈕 | 新增 `DebugWindowButtons` 旗標與 `DebugWindow.VisibleButtons`; `Auto` 開關不在需求列出的旗標內, 一律顯示 |
+| 新公開 API | `DebugWindow.LogCapacity` / `UnityCapacity` / `UsesDefaultPosition` / `VisibleButtons`、`LogLevelSwitch`、`LogLevelColor`、Editor 的 `ScriptingDefineUtility` / `LogSettingsChecker` / `LogSettingsAssets` |
+| 行為變更 | 每次進入 Play 時 `Log.isPrintLog` / `isDebugLog` / 堆疊追蹤開關與 `DebugLogs.isConsoleWithGUI` 也恢復為設定檔的值 (原本只有關閉 Domain Reload 時會保留上次的值) |
+| Editor 工具 | Project Settings `Project/TorbenTools/Log` (檔案、建置與唯讀設定表格)、設定檔的 Inspector (預設折疊欄位 + Save Current State, 等級顏色用 Color picker)、`TorbenTools/` 選單、狀態檢查 6 項、進入 Play 時的摘要; `Torben.Editor` 加入 `Torben.Runtime` 引用; 新增 `Library.Tests.EditMode` 測試組件 |
+| 測試隔離 | `DebugWindowTests` 與 `LogSettingsInstallTests` 在 SetUp 以 `CreateInstance<LogSettings>()` 重新安裝, TearDown 恢復啟動時的設定檔; 專案的覆蓋檔 (例如開啟 `openWindowOnStart`) 不影響測試結果 |
+| Build Profile | `BuildProfile.GetActiveBuildProfile().scriptingDefines` 可讀到目前 profile 的 define (編譯通過; 有啟用 profile 時的顯示未人工確認)。Keep Debug Log in Builds 只改 Player Settings, 不管理 profile 的 define |
+
 ## 8. 目前沒有的能力 (設計時可考慮的缺口)
 
 以下只列出現況缺少的部分, 不代表都需要做:
@@ -375,10 +394,9 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 - **sink 錯誤隔離 / 非同步**: sink 例外會往上拋; 沒有背景執行緒或佇列。
 - **持久化**: 沒有寫檔 sink、沒有匯出或複製功能 (行動平台寫檔涉及路徑與權限, 屬平台風險)。
 - **視窗開關**: 沒有快捷鍵或手勢, 需專案自行呼叫 `DebugLogs.isGUILog`。
-- **容量**: 200 筆為常數, 無法設定。
-- **相同訊息合併**: 只在顯示層合併, 儲存仍是每筆一份 (各 200 筆), 不是儲存端減量。
-- **Editor 工具**: 無 (例如 Inspector 或 Project Settings 設定面板)。
-- **設定方式**: 全部是靜態欄位, 沒有 ScriptableObject 或 Inspector 設定入口。
+- **容量**: 只能在啟動時由設定檔決定, 執行中不能修改。
+- **相同訊息合併**: 只在顯示層合併, 儲存仍是每筆一份, 不是儲存端減量。
+- **設定檔切換**: 不能依建置設定檔切換不同 `LogSettings`; 不支援逐欄位覆蓋。
 
 ---
 

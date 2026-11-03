@@ -8,12 +8,16 @@ public sealed class DebugWindowTests
 {
     private bool savedPrintLog;
     private bool savedDebugLog;
+    private LogSettings defaults;
 
     [SetUp]
     public void SetUp()
     {
         savedPrintLog = Log.isPrintLog;
         savedDebugLog = Log.isDebugLog;
+        // 以欄位初始值開始, 不受專案設定檔 (含覆蓋檔) 影響
+        defaults = ScriptableObject.CreateInstance<LogSettings>();
+        DebugLogs.Install(defaults);
         Log.isPrintLog = true;
         Log.isDebugLog = false;
     }
@@ -35,6 +39,8 @@ public sealed class DebugWindowTests
         foreach (LogLevel level in System.Enum.GetValues(typeof(LogLevel)))
             DebugWindow.SetLevelVisible(level, true);
         if (CrossObject.IsReady) Object.Destroy(CrossObject.Instance.gameObject);
+        DebugLogs.Install(DebugLogs.StartupSettings);   // 恢復進入 Play 時的安裝結果
+        Object.Destroy(defaults);
         Log.isPrintLog = savedPrintLog;
         Log.isDebugLog = savedDebugLog;
     }
