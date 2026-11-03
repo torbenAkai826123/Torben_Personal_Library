@@ -19,7 +19,7 @@
 | 情境 | 範例 | 避免方式 |
 |---|---|---|
 | 值型別指派給 `object` | `object o = 5;` | 保留原型別，或改用泛型 |
-| 傳給參數型別為 `object` 的方法 | `string.Format("{0}", hp)` | 用泛型方法延後處理 (例如 `Log.DebugFormat`) |
+| 傳給參數型別為 `object` 的方法 | `string.Format("{0}", hp)` | 用泛型方法延後處理 (例如 `Log.Format`) |
 | `params object[]` | `Foo(params object[] args)` 傳入 `int` | 提供固定數量的泛型多載；陣列本身也會配置 |
 | 字串插值內含值型別 | `$"血量 {hp}"` | 見下方「字串插值」 |
 | 值型別轉成介面 | `IComparable c = 5;`、把 `struct` 傳給參數型別為介面的方法 | 改用泛型約束 `void Foo<T>(T x) where T : IComparable<T>` |
@@ -53,16 +53,17 @@ C# 10 起有 interpolated string handler，可以讓 `$"..."` 避免裝箱，甚
 
 ## 搭配本專案 Log 系統的寫法
 
-問題在於 C# 會**先算好所有引數才進入方法**，所以 `Log.Debug($"血量 {hp}")` 在 log 關閉時，裝箱與組字串仍然已經發生。
+問題在於 C# 會**先算好所有引數才進入方法**，所以 `Log.Information($"血量 {hp}")` 在 log 關閉時，裝箱與組字串仍然已經發生。
 
 | 情境 | 寫法 |
 |---|---|
 | 不在每幀路徑上 | 直接用 `$"..."`，好讀優先 |
-| 每幀路徑，參數 3 個以內 | `Log.DebugFormat("血量 {0}", hp)`：參數以泛型傳入，關閉時零配置 |
-| 每幀路徑，參數超過 3 個或格式複雜 | `if (Log.IsEnabled(LogLevel.Debug)) Log.Debug($"...");` |
-| 固定字串 | `Log.Debug("固定文字")`：常值不配置 |
+| 每幀路徑，參數 3 個以內 | `Log.Format(LogLevel.Normal, "血量 {0}", hp)`：參數以泛型傳入，關閉時零配置 |
+| 每幀路徑，參數超過 3 個或格式複雜 | `if (Log.IsEnabled(LogLevel.Normal)) Log.Information($"...");` |
+| 固定字串 | `Log.Information("固定文字")`：常值不配置 |
+| Debug 等級 | `Log.Debug($"血量 {hp}")`：帶 `[Conditional]`，正式版整行 (含組字串) 被編譯期移除 |
 
-`XxxFormat` 在 log 開啟時仍會裝箱並組字串 (內部呼叫 `string.Format`)；這是要輸出 log 本來就得付的成本。
+`Log.Format` 在 log 開啟時仍會裝箱並組字串 (內部呼叫 `string.Format`)；這是要輸出 log 本來就得付的成本。
 
 ## 判斷原則
 

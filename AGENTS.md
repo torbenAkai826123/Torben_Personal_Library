@@ -121,6 +121,16 @@ TextMeshPro 動態字型 (`SDF.asset`) 的變動是 Editor 顯示文字時自動
 - 無法判斷是否值得時，列出量測數據與取捨交給使用者決定，不自行選擇。
 - Performance Testing 預設只記錄數據；只有標記為熱路徑的 API 才設為通過／失敗門檻。
 
+## Log 使用規則
+
+詳細說明見 [`docs/log-system.md`](docs/log-system.md)。
+
+- 有動態值 (`$"..."`、`+` 串接) 的 Information／Warning／Error，一律用 `Log.Format`。
+- 固定字串常值直接用 `Log.Information`／`Warning`／`Error` (常值不配置)。
+- Debug 等級用 `Log.Debug`，可以使用 `$"..."` (正式版會被編譯期移除)。不要用 `Log.Format(LogLevel.Debug, ...)`。
+- 函式庫 (Core／Runtime) 內部不得呼叫 `Log.Debug`。
+- `Log.Debug` 的參數不得有副作用。
+
 ## 測試
 
 - 改到 Core：執行 `dotnet test`，不受 Editor 是否開啟影響。

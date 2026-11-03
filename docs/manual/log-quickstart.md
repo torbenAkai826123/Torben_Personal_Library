@@ -28,17 +28,20 @@ Log.Error("連線失敗");
 Log.Debug("讀取設定");                // 只有 isDebugLog 開啟時才會輸出
 ```
 
-訊息裡要放變數時，用 `XxxFormat`，不要用 `+` 或 `$"..."`：
+`Log.Debug` 只在 Editor、Development Build 或定義了 `TORBEN_LOG_DEBUG` 時保留，正式版整行會被移除，所以可以直接用 `$"..."`；但參數裡不要寫 `i++` 這類有副作用的運算 (會跟著被移除)。
+
+`Information` / `Warning` / `Error` 的訊息裡要放變數時，用 `Log.Format`，不要用 `+` 或 `$"..."`：
 
 ```csharp
-Log.DebugFormat("hp={0}", hp);                                    // 開啟時才組字串
-Log.WarningFormat(NetworkCategory.Instance, "重試 {0}/{1}", n, max); // 有分類時放第一個
+Log.Debug($"hp={hp}");                                                        // 正式版會被移除
+Log.Format(LogLevel.Normal, "hp={0}", hp);                                    // 開啟時才組字串
+Log.Format(LogLevel.Warning, NetworkCategory.Instance, "重試 {0}/{1}", n, max); // 有分類時放在等級後面
 
-if (Log.IsEnabled(LogLevel.Debug))   // 參數超過 3 個或組字串較複雜時
-    Log.Debug(BuildReport());
+if (Log.IsEnabled(LogLevel.Normal))   // 參數超過 3 個或組字串較複雜時
+    Log.Information(BuildReport());
 ```
 
-原因：`"hp=" + hp` 和 `$"hp={hp}"` 在呼叫前就會組好字串，即使 Log 關著也會產生記憶體配置 (GC)。`XxxFormat` 在 Log 關閉時什麼都不做。
+原因：`"hp=" + hp` 和 `$"hp={hp}"` 在呼叫前就會組好字串，即使 Log 關著也會產生記憶體配置 (GC)。`Log.Format` 在 Log 關閉時什麼都不做。Debug 等級請用 `Log.Debug`，不要用 `Log.Format(LogLevel.Debug, ...)` (不會被編譯期移除)。
 
 ## 3. 加上分類標籤 (可省略)
 
@@ -126,4 +129,4 @@ UnityLogCategory.Instance.tagColorHex = "#B39DDB";
 | 設定好像沒生效 | 設定得太早被重設，改在 `BeforeSceneLoad` 之後設定 |
 | 訊息裡的 `<b>`、`<color=...>` 變成粗體或顏色 | 訊息支援 rich text 標記，Console 和畫面視窗都會解讀 |
 | 視窗裡出現沒寫過的 `[Unity]` 訊息 | 那是 Unity 本身或其他程式的訊息；不想看就取消勾選 **Unity**，不想收集就設 `DebugLogs.isUnityLog = false` |
-| `XxxFormat` 丟出 `FormatException` | `{0}` 的編號超過參數數量，或大括號沒成對 |
+| `Log.Format` 丟出 `FormatException` | `{0}` 的編號超過參數數量，或大括號沒成對 |

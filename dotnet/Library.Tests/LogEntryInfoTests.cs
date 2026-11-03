@@ -47,7 +47,7 @@ public class LogEntryInfoTests
     [Test]
     public void Format_FillsCallerInfo()
     {
-        Log.WarningFormat(TestCatlog.Instance, "{0}-{1}", 1, 2);
+        Log.Format(LogLevel.Warning, TestCatlog.Instance, "{0}-{1}", 1, 2);
 
         Assert.That(_sink.Entries[0].Message, Is.EqualTo("1-2"));
         Assert.That(_sink.Entries[0].CallerMemberName, Is.EqualTo(nameof(Format_FillsCallerInfo)));
@@ -57,7 +57,7 @@ public class LogEntryInfoTests
     public void Format_ThreeStringArgs_BindToFormatArguments()
     {
         // 沒有 LogArgsEnd 時, 第 3 個字串參數會被編譯器綁到 2 參數版本的 callerMemberName
-        Log.InformationFormat("{0}{1}{2}", "a", "b", "c");
+        Log.Format(LogLevel.Normal, "{0}{1}{2}", "a", "b", "c");
 
         Assert.That(_sink.Entries[0].Message, Is.EqualTo("abc"));
         Assert.That(_sink.Entries[0].CallerMemberName, Is.EqualTo(nameof(Format_ThreeStringArgs_BindToFormatArguments)));
@@ -123,7 +123,7 @@ public class LogEntryInfoTests
     public void StackTrace_TextStartsAtCaller()
     {
         Log.SetStackTraceEnabled(LogLevel.Error, true);
-        Log.ErrorFormat("{0}", 1);
+        Log.Format(LogLevel.Error, "{0}", 1);
 
         string text = _sink.Entries[0].StackTrace.Text;
         string firstLine = text.Split('\n')[0];

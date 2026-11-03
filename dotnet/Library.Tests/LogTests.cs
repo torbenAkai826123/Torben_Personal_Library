@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using Torben;
 
@@ -186,7 +188,7 @@ public class LogTests
     [Test]
     public void Format_Enabled_WritesFormattedMessage()
     {
-        Log.InformationFormat("a={0} b={1} c={2}", 1, "x", 2.5f);
+        Log.Format(LogLevel.Normal, "a={0} b={1} c={2}", 1, "x", 2.5f);
 
         Assert.That(_sink.Entries, Has.Count.EqualTo(1));
         Assert.That(_sink.Entries[0].Level, Is.EqualTo(LogLevel.Normal));
@@ -197,7 +199,7 @@ public class LogTests
     [Test]
     public void Format_WithCategory_UsesCategoryAndLevel()
     {
-        Log.WarningFormat(TestCatlog.Instance, "retry {0}/{1}", 1, 3);
+        Log.Format(LogLevel.Warning, TestCatlog.Instance, "retry {0}/{1}", 1, 3);
 
         Assert.That(_sink.Entries, Has.Count.EqualTo(1));
         Assert.That(_sink.Entries[0].Level, Is.EqualTo(LogLevel.Warning));
@@ -206,14 +208,59 @@ public class LogTests
     }
 
     [Test]
+    public void Format_EachLevel_WritesWithThatLevel()
+    {
+        Torben.Log.isDebugLog = true;
+
+        Log.Format(LogLevel.Normal, "{0}", 1);
+        Log.Format(LogLevel.Warning, "{0}", 2);
+        Log.Format(LogLevel.Error, TestCatlog.Instance, "{0}", 3);
+        Log.Format(LogLevel.Debug, TestCatlog.Instance, "{0}{1}{2}", 4, 5, 6);
+
+        Assert.That(_sink.Entries, Has.Count.EqualTo(4));
+        Assert.That(_sink.Entries[0].Level, Is.EqualTo(LogLevel.Normal));
+        Assert.That(_sink.Entries[1].Level, Is.EqualTo(LogLevel.Warning));
+        Assert.That(_sink.Entries[2].Level, Is.EqualTo(LogLevel.Error));
+        Assert.That(_sink.Entries[2].Category.Tag, Is.EqualTo("[Test]"));
+        Assert.That(_sink.Entries[3].Level, Is.EqualTo(LogLevel.Debug));
+        Assert.That(_sink.Entries[3].Message, Is.EqualTo("456"));
+    }
+
+    [Test]
     public void Format_DebugDisabled_DoesNotFormatArguments()
     {
         var arg = new CountingArg();
 
-        Log.DebugFormat("{0}", arg);
+        Log.Format(LogLevel.Debug, "{0}", arg);
 
         Assert.That(_sink.Entries, Is.Empty);
         Assert.That(arg.ToStringCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Debug_HasConditionalSymbols()
+    {
+        var method = typeof(Log).GetMethod(nameof(Log.Debug));
+        var symbols = method.GetCustomAttributes(typeof(System.Diagnostics.ConditionalAttribute), false)
+            .Cast<System.Diagnostics.ConditionalAttribute>()
+            .Select(attribute => attribute.ConditionString);
+
+        Assert.That(symbols, Is.EquivalentTo(new[] { "UNITY_EDITOR", "DEVELOPMENT_BUILD", "TORBEN_LOG_DEBUG" }));
+    }
+
+    // 防止日後又加回多載: 公開寫入方法只有 Information / Warning / Error / Debug 各 1 個與 Format 6 個
+    [Test]
+    public void PublicWriteMethods_OnlyExpectedTen()
+    {
+        var writeNames = new[] { nameof(Log.Information), nameof(Log.Warning), nameof(Log.Error), nameof(Log.Debug), nameof(Log.Format) };
+        var methods = typeof(Log).GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Where(method => !method.IsSpecialName && method.ReturnType == typeof(void)
+                && method.GetParameters().Any(parameter => parameter.ParameterType == typeof(LogArgsEnd)))
+            .ToList();
+
+        Assert.That(methods.Select(method => method.Name).Distinct(), Is.EquivalentTo(writeNames));
+        Assert.That(methods, Has.Count.EqualTo(10));
+        Assert.That(methods.Count(method => method.Name == nameof(Log.Format)), Is.EqualTo(6));
     }
 
     [Test]
@@ -223,7 +270,7 @@ public class LogTests
         Torben.Log.isPrintLog = false;
         try
         {
-            Log.ErrorFormat(TestCatlog.Instance, "{0}", arg);
+            Log.Format(LogLevel.Error, TestCatlog.Instance, "{0}", arg);
         }
         finally
         {

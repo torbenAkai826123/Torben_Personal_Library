@@ -7,6 +7,8 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AssemblyName>Library.Tests</AssemblyName>
+    <!-- Log.Debug 帶 [Conditional], 測試專案沒有 UNITY_EDITOR, 需定義此 symbol 才會保留呼叫 -->
+    <DefineConstants>$(DefineConstants);TORBEN_LOG_DEBUG</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,7 +1,7 @@
 # Log 系統現況報告 (給設計用 AI)
 
 - 對象: 負責後續設計 Log 系統的 AI。假設讀者看不到原始碼, 本文已附上必要的型別定義。
-- 基準: 提交 `5207f04` (2026-11-03), 分支 `main`。含 2026-11-02 的問題修正 (第 7 節)、Unity 引擎訊息收集, 以及 2026-11-03 的時間 / 呼叫端位置 / 堆疊追蹤與視窗顯示 (第 7.1 節)。
+- 基準: 提交 `5207f04` (2026-11-03), 分支 `main`。含 2026-11-02 的問題修正 (第 7 節)、Unity 引擎訊息收集, 2026-11-03 的時間 / 呼叫端位置 / 堆疊追蹤與視窗顯示 (第 7.1 節), 以及同日的寫入方法精簡 (第 7.2 節)。
 - 權威說明: [`docs/log-system.md`](log-system.md) (行為與 API); 本報告補上資料結構全貌、限制、缺口與已知問題。兩者衝突時以原始碼為準。
 
 ---
@@ -31,7 +31,8 @@
 | 功能 | 狀態 | 位置 |
 |---|---|---|
 | 靜態 Log 入口 (4 個等級) | 完成 | Core `Log` |
-| 關閉時零配置的格式化 API | 完成 | Core `Log.IsEnabled`、`Log.XxxFormat` |
+| 關閉時零配置的格式化 API | 完成 | Core `Log.IsEnabled`、`Log.Format` |
+| Debug 等級編譯期移除 | 完成 | Core `Log.Debug` 的 `[Conditional]` |
 | 總開關、Debug 等級開關 | 完成 | Core `Log.isPrintLog` / `isDebugLog` |
 | 多 sink (copy-on-write) | 完成 | Core `Log.AddSink` 等 |
 | 分類標籤 + 標籤顏色 | 完成 | Core `LogCategory` |
@@ -65,7 +66,8 @@
 
 ```text
 呼叫端: Log.Information / Warning / Error / Debug(message, category)
-        或 Log.XxxFormat([category,] format, arg1..arg3)  ← 先檢查 IsEnabled, 開啟才 string.Format
+        或 Log.Format(level, [category,] format, arg1..arg3)  ← 先檢查 IsEnabled, 開啟才 string.Format
+        (Log.Debug 在呼叫端未定義 UNITY_EDITOR / DEVELOPMENT_BUILD / TORBEN_LOG_DEBUG 時整行被編譯期移除)
         │
         │  (1)(2) IsEnabled(level) 為 false → 直接 return
         │         (isPrintLog 關閉、沒有 sink, 或 Debug 等級但 isDebugLog 關閉)
@@ -235,22 +237,25 @@ public static class Log
     public static void Information(string message, LogCategory category = default, ...);
     public static void Warning(string message, LogCategory category = default, ...);
     public static void Error(string message, LogCategory category = default, ...);
+    [Conditional("UNITY_EDITOR")] [Conditional("DEVELOPMENT_BUILD")] [Conditional("TORBEN_LOG_DEBUG")]
     public static void Debug(string message, LogCategory category = default, ...);
 
-    // 每個等級各 6 個多載 (InformationFormat / WarningFormat / ErrorFormat / DebugFormat):
-    public static void DebugFormat<T1>(string format, T1 arg1, ...);
-    public static void DebugFormat<T1, T2>(string format, T1 arg1, T2 arg2, ...);
-    public static void DebugFormat<T1, T2, T3>(string format, T1 arg1, T2 arg2, T3 arg3, ...);
-    public static void DebugFormat<T1>(LogCategory category, string format, T1 arg1, ...);
+    // 6 個多載: 有 / 無 category 各 1~3 個泛型參數
+    public static void Format<T1>(LogLevel level, string format, T1 arg1, ...);
+    public static void Format<T1, T2>(LogLevel level, string format, T1 arg1, T2 arg2, ...);
+    public static void Format<T1, T2, T3>(LogLevel level, string format, T1 arg1, T2 arg2, T3 arg3, ...);
+    public static void Format<T1>(LogLevel level, LogCategory category, string format, T1 arg1, ...);
     // ... 帶 category 的 2、3 參數版本同理
 }
 ```
 
-- `XxxFormat` 關閉時零配置 (泛型參數不裝箱、不呼叫 `ToString`); 開啟時每次呼叫配置。
-- 刻意不用 `Debug(string, T)` 同名多載: 傳入分類子類別時泛型多載會勝出, 分類會被當成格式參數。
-- 字串插值 `$"..."` 與 `+` 串接仍會在呼叫前配置; 要嘛改用 `XxxFormat`, 要嘛先檢查 `IsEnabled`。
-- Caller 參數由編譯器在呼叫處填入, 是編譯期常數, 不配置。編譯器只填「被呼叫的方法」的參數, 所以 28 個公開方法都要各自宣告, 無法集中。
-- `LogArgsEnd` 的用途: 沒有它時 `InformationFormat("{0}{1}{2}", a, b, "c")` 會被多載解析選成 2 參數版本 (選填參數都要補預設值時, 比較型別特定度, `string` 勝過 `T3`), `"c"` 變成 `callerMemberName` 且不報錯。有測試覆蓋。
+- 公開寫入方法共 10 個: `Information` / `Warning` / `Error` / `Debug` 各 1 個 + `Format` 6 個 (dotnet 測試以反射鎖定數量)。
+- `Format` 關閉時零配置 (泛型參數不裝箱、不呼叫 `ToString`); 開啟時每次呼叫配置。`Format(LogLevel.Debug, ...)` 不會被 `[Conditional]` 移除, Debug 等級請用 `Log.Debug`。
+- `Log.Debug` 的去留由呼叫端的編譯決定: 遊戲程式勾選 Development Build 或定義 `TORBEN_LOG_DEBUG` 可保留; 函式庫內部不得呼叫 (打包 DLL 時就決定了)。參數中的副作用會跟著被移除。
+- 刻意不用 `Information(string, T)` 同名多載: 傳入分類子類別時泛型多載會勝出, 分類會被當成格式參數。
+- 字串插值 `$"..."` 與 `+` 串接仍會在呼叫前配置; 要嘛改用 `Format`, 要嘛先檢查 `IsEnabled`; `Log.Debug` 在正式版整行移除, 可直接用 `$"..."`。
+- Caller 參數由編譯器在呼叫處填入, 是編譯期常數, 不配置。編譯器只填「被呼叫的方法」的參數, 所以 10 個公開寫入方法都要各自宣告, 無法集中。
+- `LogArgsEnd` 的用途: 沒有它時 `Format(level, "{0}{1}{2}", a, b, "c")` 會被多載解析選成 2 參數版本 (選填參數都要補預設值時, 比較型別特定度, `string` 勝過 `T3`), `"c"` 變成 `callerMemberName` 且不報錯。有測試覆蓋。
 - 寫入時的成本: 開啟時每筆多一次 `DateTime.UtcNow`; 開啟堆疊追蹤的等級每筆多一次 `StackTrace` 擷取 (配置)。
 - `[CallerFilePath]` 會把建置機器的完整路徑字串留在執行檔裡。
 
@@ -304,10 +309,12 @@ Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下
 
 | 測試 | 數量 | 本次結果 |
 |---|---|---|
-| dotnet `LogTests` + `LogHistorySinkTests` + `LogEntryInfoTests` | 58 | **通過** (2026-11-02 `dotnet test Library.Tests/Library.Tests.csproj`, 整體 108/108) |
-| PlayMode `DebugWindowTests` | 20 | **通過** (2026-11-03 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 27/27; EditMode 8/8) |
+| dotnet `LogTests` + `LogHistorySinkTests` + `LogEntryInfoTests` | 61 (58 → 61, 7.2 新增 3 個) | **通過** (2026-11-03 `dotnet test dotnet/Library.Tests/Library.Tests.csproj`, 整體 111/111) |
+| PlayMode `DebugWindowTests` | 22 | **通過** (2026-11-03 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 29/29; EditMode 8/8) |
 
-dotnet `LogEntryInfoTests` 涵蓋: 呼叫端位置 (含 `XxxFormat` 與 3 個字串參數的多載選擇)、UTC 時間、3 參數建構子無額外資訊、堆疊追蹤預設值與開關、堆疊從呼叫端開始且快取、`FromText`、`LogText` 的時間 / 路徑 / Unity 位置解析。
+dotnet `LogTests` 另含 `Format` 4 個等級 / 有無分類 / 關閉時不格式化、`Log.Debug` 的 3 個 `ConditionalAttribute`、公開寫入方法只有 10 個 (反射, 只在測試中使用)。測試專案在 `DefineConstants` 加入 `TORBEN_LOG_DEBUG`, 否則測試中的 `Log.Debug` 會被移除。
+
+dotnet `LogEntryInfoTests` 涵蓋: 呼叫端位置 (含 `Format` 與 3 個字串參數的多載選擇)、UTC 時間、3 參數建構子無額外資訊、堆疊追蹤預設值與開關、堆疊從呼叫端開始且快取、`FromText`、`LogText` 的時間 / 路徑 / Unity 位置解析。
 
 PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置、過大視窗縮為半個畫面、超出畫面位置拉回、自動縮放、Unity 訊息收集 (等級與分類)、不重複收自己的 Log、`isUnityLog` 關閉、不受 `isPrintLog` 影響、清 Log 不影響 Unity、來源篩選設定、Time / Loc / Collapse 設定、Log 紀錄帶時間與呼叫端、Unity 訊息帶時間與堆疊位置、開啟所有顯示選項時繪製不出錯。
 
@@ -343,11 +350,23 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 | `HideInCallstack` | **不採用**。查 6000.5.5f1 的 `UnityEditor.CoreModule.dll`: `ConsoleWindow.InitializeHideInCallstackMethodsCache` 以 `TypeCache.GetMethodsWithAttribute<HideInCallstackAttribute>()` 收集方法名, 只在 Console 開啟「Strip logging callstack」時從詳細區堆疊文字去掉 (`StacktraceWithHyperlinks` → `StripCallstack`)。屬性在各平台的 `UnityEngine.CoreModule` 都存在, 但只在 Editor Console 有作用; 對點兩下跳轉是否有效**未查證**。`Log` 在 Core 無法標記, 所以 Console 點兩下仍跳到 `DebugLogs.Write`; 目前以視窗的位置連結替代 |
 | 文件 | `docs/log-system.md` 補 API、視窗操作、可調整外觀參數表 |
 
+### 7.2 2026-11-03 寫入方法精簡 (28 → 10, 破壞性變更)
+
+| 項目 | 處理 |
+|---|---|
+| `XxxFormat` | 刪除 `InformationFormat` / `WarningFormat` / `ErrorFormat` / `DebugFormat` 共 24 個多載 |
+| `Log.Format` | 新增 6 個多載, 以 `LogLevel` 為第一個參數; 行為同原本的 `XxxFormat` (關閉時零配置), 保留 `LogArgsEnd` |
+| `Log.Debug` | 加上 `[Conditional("UNITY_EDITOR")]`、`[Conditional("DEVELOPMENT_BUILD")]`、`[Conditional("TORBEN_LOG_DEBUG")]` |
+| 判斷依據 | 只有 Log **關閉時**的配置需要處理; Debug 給開發者用, 正式版以編譯期移除; Warning / Error 多在異常分支, 一般版的配置可接受 |
+| 呼叫端遷移 | `Log.XxxFormat(...)` → `Log.Format(LogLevel.Xxx, ...)`; PlayMode 測試 1 處、dotnet 測試 5 處。Core / Runtime 原始碼沒有 `Log.Debug(` 呼叫 |
+| 測試 | dotnet 測試專案加 `TORBEN_LOG_DEBUG`; 新增 `Format` 4 個等級、`Conditional` symbol、10 個寫入方法的測試 |
+| 規則 | `AGENTS.md` 新增「Log 使用規則」 |
+
 ## 8. 目前沒有的能力 (設計時可考慮的缺口)
 
 以下只列出現況缺少的部分, 不代表都需要做:
 
-- **編譯期移除**: 沒有 `[Conditional]`, 正式建置仍會保留所有 Log 呼叫 (只是關閉時不輸出)。
+- **編譯期移除**: 只有 `Log.Debug` 有 `[Conditional]` (7.2); `Information` / `Warning` / `Error` / `Format` 在正式建置仍保留 (關閉時不輸出)。
 - **Entry 資訊**: 時間、呼叫端位置、堆疊追蹤已完成 (7.1)。仍沒有影格編號、遊戲時間 (需由 Runtime 注入)、執行緒 ID、context 物件。
 - **Console 點兩下**: 仍跳到 `DebugLogs.Write`, 不是呼叫端。可能做法 (未實作、未驗證): Console 訊息加 `<a href="..." line="...">` 超連結; 或 Editor 以 `[OnOpenAsset]` 攔截後依呼叫端轉址 (需讀 Console 內部狀態, 較脆弱)。
 - **視窗互動**: 沒有點擊整列反白 / 選取 (已評估: 需記錄選取狀態與整列點擊判斷, 比分隔線複雜, 未做); 沒有複製單筆內容。

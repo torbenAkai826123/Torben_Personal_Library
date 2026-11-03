@@ -339,7 +339,7 @@ public sealed class DebugWindowTests
         DebugLogs.isGUILog = true;
         yield return null;
 
-        for (int i = 0; i < 250; i++) Log.InformationFormat("overflow {0}", i);
+        for (int i = 0; i < 250; i++) Log.Format(LogLevel.Normal, "overflow {0}", i);
         DebugWindow.AutoScroll = false;
         yield return null;
         yield return null;

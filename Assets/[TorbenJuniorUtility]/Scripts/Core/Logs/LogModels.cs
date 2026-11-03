@@ -61,7 +61,7 @@ namespace Torben
     }
 
     /// <summary>
-    /// 分隔 XxxFormat 的格式參數與呼叫端資訊參數, 不要傳入.
+    /// 分隔 Log.Format 的格式參數與呼叫端資訊參數, 不要傳入.
     /// 沒有它時, 多傳一個字串或整數參數會被編譯器當成呼叫端資訊, 而不是報錯.
     /// </summary>
     public readonly struct LogArgsEnd { }
