@@ -15,4 +15,9 @@
     <Compile Include="../../Assets/[TorbenJuniorUtility]/Scripts/Core/**/*.cs" />
   </ItemGroup>
 
+  <!-- 讓 dotnet 測試直接驗證 internal 的文字處理 (只影響 dotnet 建置, Unity 不讀此檔) -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Library.Tests" />
+  </ItemGroup>
+
 </Project>

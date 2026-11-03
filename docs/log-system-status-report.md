@@ -158,12 +158,13 @@ public sealed class LogStackTrace
 {
     public static LogStackTrace Capture();             // new System.Diagnostics.StackTrace(1, true); 每次配置
     public static LogStackTrace FromText(string text); // null / 空白回傳 null; 用於 Unity 提供的堆疊文字
-    public string Text { get; }                        // 第一次讀取才轉文字並快取; 去掉最上方 "Torben.Log." 的框架
+    public string Text { get; }                        // 第一次讀取才轉文字並快取; 去掉最上方 "Torben.Log." 的框架後逐行清理
 }
 ```
 
 - 擷取與轉文字分開: `Log` 呼叫時只存框架, 視窗展開時才轉文字。
-- 檔名與行號依平台: Editor 有; Mono 建置版、IL2CPP **未驗證**。
+- 檔名與行號依平台: Editor 有; IL2CPP 堆疊行號已驗證, 需開啟 File Name and Line Number (Player Settings 的 IL2CPP Stacktrace Information); Mono 建置版**未驗證**。
+- 轉文字時逐行清理 (`CleanFrames`, `FromText` 也套用): 去掉 IL 偏移 ` [0x...]` 並把路徑縮短成 `LogText.ToDisplayPath(路徑, null)`; 角括號內是 MVID 時視為沒有原始碼位置, 去掉 ` <0x... + 0x...> 數字 in <MVID>:數字` 與 ` [0x...] in <MVID>:數字` 尾段; Mono 類別庫每行行號後的空白會先略過; 其他格式原樣保留。規則見 `docs/log-system.md`「堆疊文字清理」。
 
 ### 4.3.2 `LogText` (顯示用文字轉換, 結果應由呼叫端快取)
 
@@ -313,13 +314,14 @@ Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下
 | 測試 | 數量 | 本次結果 |
 |---|---|---|
 | dotnet `LogTests` + `LogHistorySinkTests` + `LogEntryInfoTests` | 61 (58 → 61, 7.2 新增 3 個) | **通過** (2026-11-03 `dotnet test dotnet/Library.Tests/Library.Tests.csproj`, 整體 111/111) |
+| dotnet `LogStackTraceCleanTests` | 25 | **通過** (2026-11-03 `dotnet test dotnet/TorbenJunior.sln`, Library.Tests 141/141、Samples.Tests 8/8) |
 | dotnet `LogOptionsTests` | 5 | **通過** (2026-11-03 `dotnet test dotnet/TorbenJunior.sln`, Library.Tests 116/116、Samples.Tests 8/8) |
 | PlayMode `DebugWindowTests` + `LogSettingsInstallTests` | 22 + 8 | **通過** (2026-11-03 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 37/37) |
 | EditMode `ScriptingDefineUtilityTests` + `LogSettingsCheckerTests` + `LogLevelColorDrawerTests` | 38 | **通過** (2026-11-03 `unity command test run --mode editor`, 全部 EditMode 46/46) |
 
 dotnet `LogTests` 另含 `Format` 4 個等級 / 有無分類 / 關閉時不格式化、`Log.Debug` 的 3 個 `ConditionalAttribute`、公開寫入方法只有 10 個 (反射, 只在測試中使用)。測試專案在 `DefineConstants` 加入 `TORBEN_LOG_DEBUG`, 否則測試中的 `Log.Debug` 會被移除。
 
-dotnet `LogEntryInfoTests` 涵蓋: 呼叫端位置 (含 `Format` 與 3 個字串參數的多載選擇)、UTC 時間、3 參數建構子無額外資訊、堆疊追蹤預設值與開關、堆疊從呼叫端開始且快取、`FromText`、`LogText` 的時間 / 路徑 / Unity 位置解析。
+dotnet `LogEntryInfoTests` 涵蓋: 呼叫端位置 (含 `Format` 與 3 個字串參數的多載選擇)、UTC 時間、3 參數建構子無額外資訊、堆疊追蹤預設值與開關、堆疊從呼叫端開始且快取、`FromText`、`LogText` 的時間 / 路徑 / Unity 位置解析。`LogStackTraceCleanTests` 涵蓋堆疊文字清理規則 (見 4.3.1)。
 
 PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 Console、`isConsoleWithGUI`、Debug 過濾、設定讀寫、右下角預設位置、過大視窗縮為半個畫面、超出畫面位置拉回、自動縮放、Unity 訊息收集 (等級與分類)、不重複收自己的 Log、`isUnityLog` 關閉、不受 `isPrintLog` 影響、清 Log 不影響 Unity、來源篩選設定、Time / Loc / Collapse 設定、Log 紀錄帶時間與呼叫端、Unity 訊息帶時間與堆疊位置、開啟所有顯示選項時繪製不出錯。
 

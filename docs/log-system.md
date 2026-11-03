@@ -168,7 +168,21 @@ Log.Debug($"hp={hp}");                                  // Debug 等級: 正式�
 - 呼叫端參數必須宣告在每個公開方法上 (編譯器只填入「被呼叫的方法」的參數), 無法集中到一個方法。
 - `LogArgsEnd` 是分隔用的空結構: 沒有它時, `Format(level, "{0}{1}{2}", a, b, "c")` 會被編譯器選成 2 參數版本, 把 `"c"` 當成 `callerMemberName`; 有它之後多傳的參數會變成型別不符, 選到正確的多載或編譯失敗。
 - `[CallerFilePath]` 是編譯時的完整路徑, 建置版的執行檔裡會留有建置機器上的路徑字串。
-- 堆疊追蹤用 `System.Diagnostics.StackTrace` 擷取, 只存框架; 第一次讀取 `LogStackTrace.Text` 時才轉成文字 (去掉最上方 `Torben.Log` 自己的框架) 並快取。檔名與行號是否存在依平台與建置設定而定 (Editor 有; Mono 建置版、IL2CPP 的行號**未驗證**)。
+- 堆疊追蹤用 `System.Diagnostics.StackTrace` 擷取, 只存框架; 第一次讀取 `LogStackTrace.Text` 時才轉成文字 (去掉最上方 `Torben.Log` 自己的框架, 再逐行清理, 見下方「堆疊文字清理」) 並快取。檔名與行號是否存在依平台與建置設定而定: Editor 有; IL2CPP 需在 Player Settings 把 IL2CPP Stacktrace Information 設為 Method Name, File Name, and Line Number (2026-11-03 於 macOS IL2CPP 建置確認); Mono 建置版**未驗證**。
+- 堆疊文字清理 (`LogStackTrace.CleanFrames`): 逐行處理, 每行只套用第一條符合的規則, 保留行首縮排與原本的換行 (`\n` / `\r\n`)。不使用 `System.Text.RegularExpressions` (IL2CPP 會增加程式碼大小), 以字串搜尋判斷。`FromText` (Unity 提供的堆疊) 也經過同樣的處理, 但 Unity 格式不符合規則, 內容不變。
+
+  | # | 條件 (行尾) | 處理 |
+  |---|---|---|
+  | A | ` [0x十六進位] in 路徑:數字` (路徑不在角括號內) | 去掉 ` [0x...]`, 路徑改為 `LogText.ToDisplayPath(路徑, null)` (從 `Assets/` 或 `Packages/` 開始, 都沒有只留檔名) |
+  | B | ` <0x十六進位 + 0x十六進位> 數字 in <十六進位>:數字` | 從 ` <0x` 開始到行尾全部去掉 |
+  | C | ` [0x十六進位] in <十六進位>:數字` | 從 ` [0x` 開始到行尾全部去掉 |
+  | — | 其他 (Unity 的 `(at Assets/...:68)`、沒有尾段的行、角括號內不是十六進位 (例如 `<filename unknown>`)、無法辨識的格式) | 原樣保留 |
+
+  - 原則: 角括號內是十六進位 (MVID) 時, 視為沒有原始碼位置, 行號一律視為佔位 (IL2CPP 開啟行號時, 沒有原始碼的框架 (例如委派的 `Invoke`) 為 `[0x00000] in <MVID>:1`)。
+  - Unity 的 Mono 類別庫 (Editor 與 IL2CPP 共用, 6000.5.5f1 的 `mscorlib.dll` 格式字串為 `" in {0}:{1} "`) 每行行號後多一個空白: 判斷前先略過行尾空白, 改寫的行一併去掉, 原樣保留的行不動。
+  - 解析從行尾往前找: 行號為最後一個 `:` 之後的數字 (Windows 路徑本身含 `:`); 路徑為最後一個 ` in ` 與該 `:` 之間的內容 (可含空白)。
+  - 不改編譯器產生的名稱 (例如 `<>c__DisplayClass9_0`), 也不隱藏 `UnityEngine.` 框架。
+  - 例: `  at CallLog.LogError (System.String message) [0x0001c] in /Users/.../Assets/X/CallLog.cs:68` → `  at CallLog.LogError (System.String message) in Assets/X/CallLog.cs:68`; `... <0x00000 + 0xffffffff> 0 in <000...0>:0` 與 `... [0x00000] in <000...0>:1` → 只留方法。
 - Unity Console 點兩下仍會跳到 `DebugLogs.Write`。`[HideInCallstack]` 無法解決 (2026-11-02 查 6000.5.5f1 的 `UnityEditor.CoreModule.dll`): 它是 `UnityEditor.ConsoleWindow` 用 `TypeCache` 收集被標記的方法, 只在 Console 開啟「Strip logging callstack」時從詳細區的堆疊文字去掉這些框架; 屬性本身在各平台的 `UnityEngine.CoreModule` 都存在, 但只在 Editor 的 Console 有作用。`Log` 在 Core 不能引用 `UnityEngine`, 無法標記, 堆疊中仍會留下 `Torben.Log` 的框架。改用畫面視窗的位置連結開啟呼叫端。
 
 ### LogEntry
@@ -286,6 +300,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 |---|---|---|
 | `dotnet/Library.Tests/LogTests.cs` | dotnet | 多 sink、重複加入、移除、`HasSink`、`isDebugLog`、`isPrintLog`、`IsEnabled`、`Format` (4 個等級、有 / 無分類、關閉時不格式化參數)、`Log.Debug` 的 `[Conditional]` symbol、公開寫入方法只有 10 個、`SystemCategory` 標籤 |
 | `dotnet/Library.Tests/LogEntryInfoTests.cs` | dotnet | 呼叫端位置 (含 `Format` 與 3 個字串參數的多載選擇)、UTC 時間、堆疊追蹤預設值與開關、堆疊從呼叫端開始、`LogText` 的時間 / 路徑 / Unity 位置解析 |
+| `dotnet/Library.Tests/LogStackTraceCleanTests.cs` | dotnet | 堆疊文字清理: IL2CPP 兩種格式、路徑含空白 / Windows / `Packages/` / 都沒有、規則 B / C 任意行號、`<filename unknown>` 與 Unity 格式原樣、空字串與換行、`\r\n` 保留、Mono 行尾空白、先去掉 `Torben.Log.` 框架、`FromText` 經過清理 |
 | `dotnet/Library.Tests/LogHistorySinkTests.cs` | dotnet | 覆蓋最舊、Version 遞增、`CopyTo` 順序與版本號、`Clear`、容量小於 1 時丟例外、流水號遞增且跨紀錄共用 |
 | `dotnet/Library.Tests/LogOptionsTests.cs` | dotnet | `LogOptions` 欄位初始值、`Apply` / `Capture` 往返、堆疊追蹤開關對應、未定義 / 缺少 / 重複等級與 null 時不拋例外 |
 | `Scripts/Tests/PlayMode/LogSettingsInstallTests.cs` | PlayMode | 啟動時從 Resources 讀到預設檔; 沒有設定檔時與修改前相同且只警告一次; 套用預設檔; 覆蓋檔整份取代; `openWindowOnStart`; `DebugWindowOptions.Capture`; 容量 5 與 7 時兩份紀錄、合併順序、來源 / 搜尋篩選與 Collapse 正確; 隱藏按鈕後繪製不出錯 |
