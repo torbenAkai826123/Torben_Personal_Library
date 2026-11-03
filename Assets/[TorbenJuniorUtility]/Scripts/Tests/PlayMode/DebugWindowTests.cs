@@ -29,6 +29,7 @@ public sealed class DebugWindowTests
         DebugWindow.ShowTime = false;
         DebugWindow.ShowLocation = false;
         DebugWindow.Collapse = false;
+        DebugWindow.AutoScroll = true;
         DebugWindow.ResetPosition();
         DebugWindow.SearchText = string.Empty;
         foreach (LogLevel level in System.Enum.GetValues(typeof(LogLevel)))
@@ -274,6 +275,16 @@ public sealed class DebugWindowTests
     }
 
     [Test]
+    public void AutoScroll_DefaultOnAndRoundTrip()
+    {
+        Assert.That(DebugWindow.AutoScroll, Is.True);
+
+        DebugWindow.AutoScroll = false;
+
+        Assert.That(DebugWindow.AutoScroll, Is.False);
+    }
+
+    [Test]
     public void Log_HistoryHasTimeAndCaller()
     {
         Log.Information("caller");
@@ -315,6 +326,26 @@ public sealed class DebugWindowTests
         yield return null;
 
         DebugWindow.Collapse = false;
+        yield return null;
+        yield return null;
+
+        Assert.That(CrossObject.Instance.GetComponent<DebugWindow>().enabled, Is.True);
+    }
+
+    // 超過容量後舊紀錄被擠掉, 行號 (流水號) 位數增加; 切換自動捲動時繪製不出錯
+    [UnityTest]
+    public IEnumerator Window_DrawsAfterOverflowAndAutoScrollToggle()
+    {
+        DebugLogs.isGUILog = true;
+        yield return null;
+
+        for (int i = 0; i < 250; i++) Log.InformationFormat("overflow {0}", i);
+        DebugWindow.AutoScroll = false;
+        yield return null;
+        yield return null;
+
+        Log.Information("after");
+        DebugWindow.AutoScroll = true;
         yield return null;
         yield return null;
 

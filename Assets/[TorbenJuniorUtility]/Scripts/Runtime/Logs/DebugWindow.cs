@@ -23,7 +23,6 @@ namespace Torben
 
         private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
         private static readonly int levelCount = levelNames.Length;
-        private static readonly string[] countTexts = new string[Capacity * 2 + 1];  // "[n]" 快取
         private static readonly string[] countNumberTexts = new string[Capacity * 2 + 1];  // "n" 快取
 
         // ---- 靜態狀態 ----
@@ -63,7 +62,6 @@ namespace Torben
         private readonly int[] groupLast = new int[Capacity * 2];           // 群組最後一次出現的索引
         private readonly int[] groupCount = new int[Capacity * 2];
         private readonly Dictionary<GroupKey, int> groupIds = new Dictionary<GroupKey, int>(Capacity * 2);
-        private readonly int[] numberOf = new int[Capacity * 2];            // 行號: 不合併時在清單中的順序 (從 1 開始)
         // 展開狀態: 以流水號記錄, 新訊息進來或篩選改變時不會跑掉
         private readonly HashSet<long> expanded = new HashSet<long>();
         private readonly bool[] rowExpanded = new bool[Capacity * 2];
@@ -71,6 +69,8 @@ namespace Torben
         private bool rowsCollapsed;         // 上次重算可見清單時的合併設定
         private bool drawTime;              // 本次 Layout 的顯示設定
         private bool drawLocation;
+        private bool seenAutoScroll;        // 上次 Layout 時的自動捲動設定, 由關轉開時立即捲到最下方
+        private int numberDigits;           // 行號欄寬目前容納的位數
         private string projectRoot;         // Editor 中為專案根目錄, 用來縮短路徑; 建置版為 null
         private int seenFilterVersion = -1;
         private int seenStyleVersion = -1;
@@ -92,6 +92,7 @@ namespace Torben
         private GUIContent timeLabel;
         private GUIContent locationLabel;
         private GUIContent collapseLabel;
+        private GUIContent autoScrollLabel;
         private GUIContent expandRowLabel;
         private GUIContent collapseRowLabel;
         private bool dragging;
@@ -144,7 +145,7 @@ namespace Torben
             set => draggable = value;
         }
 
-        /// <summary>有新訊息時是否自動捲到最下方. 預設開啟.</summary>
+        /// <summary>有新訊息時是否自動捲到最下方; 由關轉開時立即捲到最下方. 預設開啟; 視窗的 Auto 開關同步此設定.</summary>
         public static bool AutoScroll
         {
             get => autoScroll;
@@ -218,7 +219,7 @@ namespace Torben
         }
 
         /// <summary>
-        /// 是否合併相同訊息 (等級、分類、內容與呼叫端位置都相同). 合併後顯示在第一次出現的位置 (沿用其行號), 最右側以膠囊顯示次數,
+        /// 是否合併相同訊息 (等級、分類、內容與呼叫端位置都相同). 合併後顯示在第一次出現的位置 (沿用其流水號), 最右側以膠囊顯示次數,
         /// 不顯示時間. 只合併仍在紀錄中的訊息 (Log 與 Unity 各最新 200 筆). 預設關閉; 視窗的 Collapse 開關同步此設定.
         /// </summary>
         /// <remarks>配置: 零配置; 內容改變時重新分組 (群組表擴充時才配置).</remarks>
@@ -341,6 +342,7 @@ namespace Torben
             timeLabel = new GUIContent("Time", "Show time");
             locationLabel = new GUIContent("Loc", "Show source location");
             collapseLabel = new GUIContent("Collapse", "Collapse identical messages");
+            autoScrollLabel = new GUIContent("Auto", "Auto scroll to newest");
             expandRowLabel = new GUIContent("+", "Expand");
             collapseRowLabel = new GUIContent("-", "Fold");
 #if UNITY_EDITOR
@@ -410,6 +412,7 @@ namespace Torben
             ShowTime = GUILayout.Toggle(showTime, timeLabel, GUILayout.ExpandWidth(false));
             ShowLocation = GUILayout.Toggle(showLocation, locationLabel, GUILayout.ExpandWidth(false));
             Collapse = GUILayout.Toggle(collapse, collapseLabel, GUILayout.ExpandWidth(false));
+            autoScroll = GUILayout.Toggle(autoScroll, autoScrollLabel, GUILayout.ExpandWidth(false));
             GUILayout.EndHorizontal();
 
             scroll = GUILayout.BeginScrollView(scroll);
@@ -438,8 +441,7 @@ namespace Torben
             foldStyle.margin = new RectOffset(2, 2, CenterOffset(textCenter, FoldHeight), 0);
             numberStyle = new GUIStyle(inlineDetailStyle);
             numberStyle.margin = new RectOffset(2, 0, CenterOffset(textCenter, numberStyle.padding.top * 2f + numberStyle.lineHeight), 0);
-            // 行號欄寬固定, 以最大可能的行號計算, 讓訊息左緣對齊
-            numberStyle.fixedWidth = numberStyle.CalcSize(new GUIContent(CountText(Capacity * 2))).x;
+            numberDigits = 0;   // 行號欄寬在 Refresh 中依目前最大的流水號計算
 
             badgeTexture = CreateCapsuleTexture(BadgeHeight);
             int radius = (int)(BadgeHeight / 2f);
@@ -497,7 +499,7 @@ namespace Torben
             int count = rowsCollapsed ? groupCount[groupOf[index]] : 1;
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label(CountText(numberOf[index]), numberStyle);
+            GUILayout.Label(source.GetNumber(i), numberStyle);
             bool oldEnabled = GUI.enabled;
             GUI.enabled = oldEnabled && stackTrace != null;   // 沒有堆疊追蹤時呈現無法使用
             if (GUILayout.Button(rowExpanded[row] ? collapseRowLabel : expandRowLabel, foldStyle, GUILayout.Width(FoldWidth)))
@@ -579,13 +581,6 @@ namespace Torben
 
         private long SequenceOf(int index) => SourceOf(index, out int i).Sequences[i];
 
-        // "[n]" (行號)
-        private static string CountText(int count)
-        {
-            if (count >= countTexts.Length) return "[" + count + "]";
-            return countTexts[count] ??= "[" + count + "]";
-        }
-
         // "n" (合併次數)
         private static string CountNumberText(int count)
         {
@@ -651,7 +646,22 @@ namespace Torben
             drawTime = showTime;
             drawLocation = showLocation;
 
-            if (linesAdded && autoScroll) scroll.y = float.MaxValue;
+            if (linesAdded) UpdateNumberWidth();
+            if (autoScroll && (linesAdded || !seenAutoScroll)) scroll.y = float.MaxValue;
+            seenAutoScroll = autoScroll;
+        }
+
+        // 行號欄寬固定, 讓訊息左緣對齊; 依目前最大的流水號計算, 位數增加時才重算 (最少 3 位)
+        private void UpdateNumberWidth()
+        {
+            long max = 0;
+            if (logSource.Count > 0) max = logSource.Sequences[logSource.Count - 1];
+            if (unitySource.Count > 0) max = System.Math.Max(max, unitySource.Sequences[unitySource.Count - 1]);
+            int digits = 3;
+            for (long n = max; n >= 1000; n /= 10) digits++;
+            if (digits <= numberDigits) return;
+            numberDigits = digits;
+            numberStyle.fixedWidth = numberStyle.CalcSize(new GUIContent("[" + new string('9', digits) + "]")).x;
         }
 
         // 展開: 記下這一列的流水號. 收合: 合併時同一組每次出現的流水號都移除
@@ -685,7 +695,7 @@ namespace Torben
 
         // 依流水號合併兩份紀錄 (各自已是舊到新), 再套用來源、等級與搜尋篩選.
         // 合併相同訊息時, 每組只留第一次出現的那一列 (同 Unity Console), 並以 previousOccurrence 串起同組的每一次.
-        // 行號為不合併時的順序, 合併後的列沿用第一次出現的行號
+        // 行號為流水號 (寫入順序, 不因擠掉舊紀錄或篩選而改變), 合併後的列沿用第一次出現的流水號
         private void RebuildVisible()
         {
             visibleCount = 0;
@@ -693,7 +703,6 @@ namespace Torben
             groupIds.Clear();
             int groupTotal = 0;
             int orderCount = 0;
-            int number = 0;
             int logCount = showLogMessages ? logSource.Count : 0;
             int unityCount = showUnityMessages ? unitySource.Count : 0;
             int i = 0, j = 0;
@@ -704,7 +713,6 @@ namespace Torben
                     : Capacity + j++;
                 var source = SourceOf(index, out int n);
                 if (!IsVisible(source.Snapshot[n])) continue;
-                numberOf[index] = ++number;
                 if (!rowsCollapsed)
                 {
                     visible[visibleCount++] = index;
@@ -779,6 +787,7 @@ namespace Torben
             public readonly string[] Lines = new string[Capacity];
             // 第二行用的快取, 第一次顯示時才組; null 為尚未計算
             public readonly string[] Times = new string[Capacity];
+            public readonly string[] Numbers = new string[Capacity];        // "[流水號]"
             public readonly string[] Locations = new string[Capacity];      // "路徑:行號"; 空字串為沒有位置
             public readonly string[] LocationFiles = new string[Capacity];
             public readonly int[] LocationLines = new int[Capacity];
@@ -811,6 +820,7 @@ namespace Torben
                     {
                         System.Array.Copy(Lines, shiftFrom, Lines, 0, overlap);
                         System.Array.Copy(Times, shiftFrom, Times, 0, overlap);
+                        System.Array.Copy(Numbers, shiftFrom, Numbers, 0, overlap);
                         System.Array.Copy(Locations, shiftFrom, Locations, 0, overlap);
                         System.Array.Copy(LocationFiles, shiftFrom, LocationFiles, 0, overlap);
                         System.Array.Copy(LocationLines, shiftFrom, LocationLines, 0, overlap);
@@ -825,6 +835,9 @@ namespace Torben
                 changed = true;
                 return linesAdded;
             }
+
+            // 行號: "[流水號]"
+            public string GetNumber(int i) => Numbers[i] ??= "[" + Sequences[i] + "]";
 
             // 時間: "(HH:mm:ss.ff)"; 沒有時間時為空字串
             public string GetTime(int i)
@@ -865,6 +878,7 @@ namespace Torben
             {
                 int length = Capacity - from;
                 System.Array.Clear(Times, from, length);
+                System.Array.Clear(Numbers, from, length);
                 System.Array.Clear(Locations, from, length);
                 System.Array.Clear(LocationFiles, from, length);
             }
