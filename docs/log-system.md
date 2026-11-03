@@ -162,7 +162,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 |---|---|---|
 | `History` | — | Log 訊息的歷史紀錄 (`LogHistorySink`, 最多 200 筆); Clear 按鈕只清這份 |
 | `UnityHistory` | — | Unity 引擎訊息的歷史紀錄 (最多 200 筆); Clear 按鈕不清 |
-| `ShowLogMessages` / `ShowUnityMessages` | `true` | 依來源篩選; 視窗上方 Log / Unity 開關同步此設定。兩個都開即顯示全部 |
+| `ShowLogMessages` / `ShowUnityMessages` | `true` | 依來源篩選; 視窗上方的來源按鈕同步此設定, 點擊輪替 Unity (只顯示 Unity) → Unity Off (只顯示 Log) → Both (全部)。兩者都關時按鈕顯示 None, 點擊回到 Both |
 | `Size` | 600 × 180 | 視窗大小 (縮放前單位); 最小 80 × 60 |
 | `Position` | 右下角 | 視窗左上角位置; 設定後不再自動貼齊右下角, 拖曳也會更新 |
 | `ResetPosition()` | — | 恢復右下角 |

@@ -85,8 +85,10 @@ namespace Torben
         private GUIStyle badgeStyle;        // 合併次數的膠囊標籤
         private Texture2D badgeTexture;
         private GUIContent[] levelToggleLabels;
-        private GUIContent logSourceLabel;
-        private GUIContent unitySourceLabel;
+        private GUIContent sourceBothLabel;     // 來源按鈕: 依目前狀態顯示, 點擊輪替 Unity -> Unity Off -> Both
+        private GUIContent sourceUnityLabel;
+        private GUIContent sourceLogLabel;
+        private GUIContent sourceNoneLabel;
         private GUIContent clearLabel;
         private GUIContent closeLabel;
         private GUIContent timeLabel;
@@ -173,7 +175,7 @@ namespace Torben
             }
         }
 
-        /// <summary>是否顯示 Log 訊息 (經過 Torben.Log 的訊息). 預設開啟; 視窗上方 Log 開關同步此設定.</summary>
+        /// <summary>是否顯示 Log 訊息 (經過 Torben.Log 的訊息). 預設開啟; 視窗上方的來源按鈕 (Unity / Unity Off / Both) 同步此設定.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool ShowLogMessages
         {
@@ -186,7 +188,7 @@ namespace Torben
             }
         }
 
-        /// <summary>是否顯示 Unity 引擎訊息. 預設開啟; 視窗上方 Unity 開關同步此設定.</summary>
+        /// <summary>是否顯示 Unity 引擎訊息. 預設開啟; 視窗上方的來源按鈕 (Unity / Unity Off / Both) 同步此設定.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static bool ShowUnityMessages
         {
@@ -335,8 +337,10 @@ namespace Torben
             levelToggleLabels = new GUIContent[levelCount];
             for (int i = 0; i < levelCount; i++)
                 levelToggleLabels[i] = new GUIContent(levelNames[i].Substring(0, 1), levelNames[i]);
-            logSourceLabel = new GUIContent("Log", "Log messages");
-            unitySourceLabel = new GUIContent("Unity", "Unity engine messages");
+            sourceBothLabel = new GUIContent("Both", "Showing Log and Unity messages (click: Unity only)");
+            sourceUnityLabel = new GUIContent("Unity", "Showing Unity messages only (click: hide Unity)");
+            sourceLogLabel = new GUIContent("Unity Off", "Unity messages hidden (click: show both)");
+            sourceNoneLabel = new GUIContent("None", "Log and Unity messages hidden (click: show both)");
             clearLabel = new GUIContent("Clear", "Clear Log messages (Unity messages are kept)");
             closeLabel = new GUIContent("X", "Close");
             timeLabel = new GUIContent("Time", "Show time");
@@ -400,8 +404,7 @@ namespace Torben
                 bool isOn = GUILayout.Toggle(levelVisible[i], levelToggleLabels[i]);
                 if (isOn != levelVisible[i]) SetLevelVisible((LogLevel)i, isOn);
             }
-            ShowLogMessages = GUILayout.Toggle(showLogMessages, logSourceLabel);
-            ShowUnityMessages = GUILayout.Toggle(showUnityMessages, unitySourceLabel);
+            DrawSourceButton();
             GUILayout.FlexibleSpace();
             DrawClearButton(isMouseDown, mouseDownPosition);
             if (GUILayout.Button(closeLabel)) DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
@@ -590,6 +593,29 @@ namespace Torben
 
         // 第一次點擊進入清除狀態 (黃色), 清除狀態下再點才清除 (按住時紅色, 放開後恢復原色);
         // 在視窗其他位置按下滑鼠就取消清除狀態
+        // 來源按鈕輪替: Both -> Unity (只顯示 Unity) -> Unity Off (只顯示 Log) -> Both; 兩者都關時下一步為 Both
+        private void DrawSourceButton()
+        {
+            GUIContent label = showLogMessages
+                ? (showUnityMessages ? sourceBothLabel : sourceLogLabel)
+                : (showUnityMessages ? sourceUnityLabel : sourceNoneLabel);
+            if (!GUILayout.Button(label, GUILayout.ExpandWidth(false))) return;
+            if (showLogMessages && showUnityMessages)
+            {
+                ShowLogMessages = false;
+            }
+            else if (showUnityMessages)
+            {
+                ShowLogMessages = true;
+                ShowUnityMessages = false;
+            }
+            else
+            {
+                ShowLogMessages = true;
+                ShowUnityMessages = true;
+            }
+        }
+
         private void DrawClearButton(bool isMouseDown, Vector2 mouseDownPosition)
         {
             var rect = GUILayoutUtility.GetRect(clearLabel, GUI.skin.button);
