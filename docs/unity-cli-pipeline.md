@@ -23,6 +23,7 @@
 | 登入 | 已登入，憑證存在 macOS 鑰匙圈 (`credentialSource: keyring`)。若回報未登入 (退出碼 3)，由使用者執行 `unity auth login` | `unity auth status --format json` |
 | 授權 | Unity Personal 已啟用。登入不等於啟用授權，每台機器要各自啟用；沒有授權時 Editor 會以結束碼 198 停止 (`EDITOR_LICENSING_FAILURE`)，由使用者執行 `unity license activate --personal --accept-eula` | `unity license status` |
 | Editor | `6000.5.5f1` (arm64) 已安裝，與專案版本相符，位置 `/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app`；已裝模組：Android (含 SDK、NDK、OpenJDK)、Mac Standalone。**沒有 iOS 與 Windows 建置模組** | `unity editors -i` |
+| IL2CPP | 已支援 (2026-11-03 確認)：Android 與 Mac 模組都含 IL2CPP 變體 (`PlaybackEngines/{AndroidPlayer,MacStandaloneSupport}/Variations/` 下有 `il2cpp`)，專案的 `scriptingBackend` 在 Android 與 Standalone 皆為 IL2CPP (`1`)。尚未以 `unity build` 實際建置驗證 | `ls <Editor 目錄>/PlaybackEngines/*/Variations`、`ProjectSettings/ProjectSettings.asset` 的 `scriptingBackend` |
 | Pipeline 套件 | `0.9.1-exp.1` (2026-11-02 以 `unity pipeline upgrade` 從 `0.8.0-exp.1` 升級)，已在 `Packages/manifest.json` | `unity pipeline editors` |
 | 連線開著的 Editor | 已驗證：`unity status` 列出本專案，狀態 `ready` (Editor 由使用者以 `unity open .` 開啟) | `unity status` |
 | EditMode 測試 (開著的 Editor) | 已驗證 (2026-11-02，`0.9.1-exp.1`)：8/8 通過 | `unity command test run --mode editor` |
