@@ -7,6 +7,7 @@ namespace Torben
     {
         // LOG 的全體總開關，只要關閉就會被擋住所有訊息。（預設關閉）
         public static bool isPrintLog = false; // Flag to control whether logs should be printed to the console.
+        // 針對 Debug 等級的訊息，額外的開關，總開關開啟時才會生效。（預設關閉）
         public static bool isDebugLog = false; // Flag to control whether debug logs should be printed to the console.
 
 
