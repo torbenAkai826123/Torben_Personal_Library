@@ -88,13 +88,13 @@
   sinks 陣列 (volatile, copy-on-write), 在「呼叫端的執行緒」上依序同步呼叫 Write(in entry)
         ├─ DebugLogs (Runtime)        → UnityEngine.Debug.Log / LogWarning / LogError
         │     isGUILog 開且 isConsoleWithGUI 關時略過
-        └─ LogHistorySink (Core, 200 筆) → 環狀緩衝區, 每次寫入 Version++
+        └─ LogHistorySink (Core, 容量 = 設定檔 logCapacity, 欄位初始值 200) → 環狀緩衝區, 每次寫入 Version++
                     ▲
                     │ CopyTo(snapshot, sequences, out version)  (只在 IMGUI Layout 事件)
               DebugWindow (Runtime, MonoBehaviour, 掛在 CrossObject 上)
                     │ 依流水號合併兩份紀錄
                     ▼
-              LogHistorySink (Unity 用, 200 筆) ── DebugWindow.UnityHistory
+              LogHistorySink (Unity 用, 容量 = 設定檔 unityCapacity, 欄位初始值 200) ── DebugWindow.UnityHistory
                     ▲
 Unity 引擎訊息 → Application.logMessageReceivedThreaded → DebugLogs.OnUnityLog (存時間 + Unity 的堆疊文字)
                 (isUnityLog 開啟時; 不受 isPrintLog 影響; 排除 DebugLogs 自己輸出到 Console 的訊息)
@@ -289,7 +289,7 @@ Unity 訊息的等級對應: `Warning` → Warning; `Error` / `Assert` / `Except
 
 Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下仍跳到 `DebugLogs.Write`。`Application.quitting` 時取消訂閱。
 
-安裝 (`[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]`): `Resources.Load<LogSettings>(LogSettings.ResourcesPath)` 讀取預設檔 (有 `projectOverride` 時改用覆蓋檔, 找不到時用 `CreateInstance` 的欄位初始值並以 `UnityEngine.Debug.LogWarning` 警告一次), 重設 `isGUILog`、`Log.ClearSinks()`、加入 `new DebugLogs()` 與 `DebugWindow.ResetStatics(logCapacity, unityCapacity)` 回傳的歷史紀錄, 再依序套用 `log`、`window`、`output`, 最後依 `LogSettings.DevelopmentAlert` 的等級提醒設定問題 (容量小於 1 或大於 `DebugWindowOptions.MaxRecommendedCapacity`、`log.stackTrace` / `window.levelColors` 等級重複; 正式版另檢查仍開著的開發設定, 見 7.7; 合併成一則, 不經過 `Log`; 此時已開始收集 Unity 訊息)。`Install` 也把 `Log.SinkErrorHandler` 設為以 `Debug.LogException` 輸出 (訊息第一行帶 sink 型別全名)。此階段讀得到 Resources (2026-11-03 Editor 實測), 安裝維持在 `SubsystemRegistration`。測試用的 `internal Install(LogSettings)` 以 `InternalsVisibleTo` 開放給 `Library.Tests.PlayMode`。進入 Play 都會重設 (含關閉 Domain Reload)。**注意**: 會清掉使用者在更早階段加入的自訂 sink, 自訂 sink 必須在 `BeforeSceneLoad` 之後加入。
+安裝 (`[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]`): `Resources.Load<LogSettings>(LogSettings.ResourcesPath)` 讀取預設檔 (有 `projectOverride` 時改用覆蓋檔, 找不到時用 `CreateInstance` 的欄位初始值並以 `UnityEngine.Debug.LogWarning` 警告一次), 重設 `isGUILog`、`Log.ClearSinks()`、加入 `new DebugLogs()` 與 `DebugWindow.ResetStatics(logCapacity, unityCapacity)` 回傳的歷史紀錄, 再依序套用 `log`、`window`、`output`, 最後依 `LogSettings.DevelopmentAlert` 的等級提醒設定問題 (容量小於 1 或大於 `DebugWindowOptions.MaxRecommendedCapacity`、`log.stackTrace` / `window.levelColors` 等級重複; 正式版另檢查仍開著的開發設定, 見 7.7; 合併成一則, 不經過 `Log`; 此時已開始收集 Unity 訊息)。`Install` 也把 `Log.SinkErrorHandler` 設為以 `Debug.LogException` 輸出 (訊息第一行帶 sink 型別全名)。此階段讀得到 Resources (2026-11-03 Editor 實測; macOS IL2CPP 建置版已驗證: 設定 `startWithWindow` 後啟動即顯示視窗), 安裝維持在 `SubsystemRegistration`。測試用的 `internal Install(LogSettings)` 以 `InternalsVisibleTo` 開放給 `Library.Tests.PlayMode`。進入 Play 都會重設 (含關閉 Domain Reload)。**注意**: 會清掉使用者在更早階段加入的自訂 sink, 自訂 sink 必須在 `BeforeSceneLoad` 之後加入。
 
 ### 5.2 `DebugWindow` (畫面視窗, `MonoBehaviour`)
 
@@ -477,23 +477,27 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 
 - **編譯期移除**: 只有 `Log.Debug` 有 `[Conditional]` (7.2); `Information` / `Warning` / `Error` / `Format` 在正式建置仍保留 (關閉時不輸出)。
 - **Entry 資訊**: 時間、呼叫端位置、堆疊追蹤已完成 (7.1)。仍沒有影格編號、遊戲時間 (需由 Runtime 注入)、執行緒 ID、context 物件。
-- **Console 點兩下**: 仍跳到 `DebugLogs.Write`, 不是呼叫端。可能做法 (未實作、未驗證): Console 訊息加 `<a href="..." line="...">` 超連結; 或 Editor 以 `[OnOpenAsset]` 攔截後依呼叫端轉址 (需讀 Console 內部狀態, 較脆弱)。
+- **Console 點兩下**: 仍跳到 `DebugLogs.Write`, 不是呼叫端。可能做法 (未實作、未驗證): Console 訊息加 `<a href="..." line="...">` 超連結; 或 Editor 以 `[OnOpenAsset]` 攔截後依呼叫端轉址 (需讀 Console 內部狀態, 較脆弱)。列入 8.2 刻意不做。
 - **視窗互動**: 沒有點擊整列反白 / 選取 (已評估: 需記錄選取狀態與整列點擊判斷, 比分隔線複雜, 未做)。
 - **等級**: 沒有 Fatal / Exception, 沒有「最低等級」篩選 (enum 順序也不支援)。
 - **分類篩選**: 視窗只能依等級、來源 (Log / Unity) 與文字搜尋, 不能依自訂分類開關; `Log` 也沒有依分類過濾。
 - **非同步**: 沒有背景執行緒或佇列 (sink 例外隔離已完成, 見 4.2)。
 - **持久化**: 等待讀寫系統完成後, 以寫檔 sink 實作 (行動平台寫檔涉及路徑與權限, 屬平台風險)。
-- **視窗開關**: 沒有快捷鍵或手勢, 需專案自行呼叫 `DebugLogs.isGUILog`。
-- **容量**: 只能在啟動時由設定檔決定, 執行中不能修改。
+- **視窗開關**: 啟動時可由設定檔 `startWithWindow` 開啟, 標題列紅點關閉、黃點縮小; Editor 另可用 `TorbenTools` 選單切換。建置版關閉視窗後沒有快捷鍵或手勢可以再開, 只能由程式設定 `DebugLogs.isGUILog`。列入 8.2 刻意不做。
+- **容量**: 只能在啟動時由設定檔決定, 執行中不能修改。列入 8.2 刻意不做。
 - **相同訊息合併**: 只在顯示層合併, 儲存仍是每筆一份, 不是儲存端減量。
 - **設定檔切換**: 不能依建置設定檔切換不同 `LogSettings`; 不支援逐欄位覆蓋 (兩者列入 8.2 刻意不做)。
 
-### 8.1 Android 待驗證
+### 8.1 Android / iOS 待驗證
 
 - 視窗縮放是否需納入像素密度 (目前只依畫面高度; 橫向 1080p 推測核取方塊約 1.3 mm)。
 - 觸控操作與拖曳。
+- 標題列圓點的觸控大小 (圓點直徑 12, 點擊範圍約 18 × 18, 縮放前單位), 以及縮小 / 還原後拖曳標題列的操作。
+- 工具列依寬度換列在自動縮放下的表現 (核取方塊放第一或第二列)。
 - 正式版關閉 Log 時每幀的 GC Alloc (以 Profiler 確認)。
 - `GUIUtility.systemCopyBuffer` 的行為 (複製功能)。
+
+桌面建置另有一項待驗證: 正式版開發設定提醒改為一行 (7.8) 後, 尚未在建置版確認輸出格式 (7.7 的建置版驗證為多行格式)。
 
 ### 8.2 刻意不做
 
@@ -502,6 +506,8 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 - 依建置類型切換設定。
 - 逐欄位覆蓋。
 - 執行中修改容量。
+- 縮小狀態 (`DebugWindow.Minimized`) 存進設定檔; 每次進入 Play 都從未縮小開始。
+- 重新開啟視窗的快速鍵或手勢。需要時由專案開發人員自行綁定, 呼叫 `DebugLogs.isGUILog = true` (快速鍵 / 手勢可能與遊戲輸入衝突, 且各專案使用的輸入系統不同, 不由函式庫決定)。
 
 ---
 
