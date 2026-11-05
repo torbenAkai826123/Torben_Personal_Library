@@ -227,4 +227,23 @@ public sealed class LogSettingsCheckerTests
     [Test]
     public void MaxRecommendedCapacity_SharedWithRuntime()
         => Assert.That(LogSettingsChecker.MaxRecommendedCapacity, Is.EqualTo(DebugWindowOptions.MaxRecommendedCapacity));
+
+    // output.startWithWindow 由 openWindowOnStart 改名: 舊名稱存的資料仍讀得到 (FormerlySerializedAs)
+    [Test]
+    public void StartWithWindow_ReadsOldFieldName()
+    {
+        var settings = CreateTemp("OldName");
+        string path = AssetDatabase.GetAssetPath(settings);
+        AssetDatabase.SaveAssets();
+        string fullPath = System.IO.Path.GetFullPath(path);
+        string text = System.IO.File.ReadAllText(fullPath);
+        Assert.That(text, Does.Contain("startWithWindow: 0"));
+        System.IO.File.WriteAllText(fullPath, text.Replace("startWithWindow: 0", "openWindowOnStart: 1"));
+        Resources.UnloadAsset(settings);
+        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+        var loaded = AssetDatabase.LoadAssetAtPath<LogSettings>(path);
+
+        Assert.That(loaded.output.startWithWindow, Is.True);
+    }
 }

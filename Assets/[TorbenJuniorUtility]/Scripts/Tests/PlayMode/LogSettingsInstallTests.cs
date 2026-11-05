@@ -165,10 +165,10 @@ public sealed class LogSettingsInstallTests
     }
 
     [Test]
-    public void OpenWindowOnStart_OpensWindow()
+    public void StartWithWindow_OpensWindow()
     {
         var settings = CreateSettings();
-        settings.output.openWindowOnStart = true;
+        settings.output.startWithWindow = true;
 
         DebugLogs.Install(settings);
 
@@ -427,7 +427,7 @@ public sealed class LogSettingsInstallTests
     private LogSettings CreateAllDevelopmentSettings()
     {
         var settings = CreateSettings();
-        settings.output.openWindowOnStart = true;
+        settings.output.startWithWindow = true;
         settings.log.isPrintLog = true;
         settings.log.isDebugLog = true;
         return settings;
@@ -455,14 +455,14 @@ public sealed class LogSettingsInstallTests
         Assert.That(problems, Is.Empty);
     }
 
-    [TestCase("output.openWindowOnStart")]
+    [TestCase("output.startWithWindow")]
     [TestCase("log.isPrintLog")]
     [TestCase("log.isDebugLog")]
     [TestCase("TORBEN_LOG_DEBUG")]
     public void ReleaseProblems_EachItemAlone(string item)
     {
         var settings = CreateSettings();
-        settings.output.openWindowOnStart = item == "output.openWindowOnStart";
+        settings.output.startWithWindow = item == "output.startWithWindow";
         settings.log.isPrintLog = item == "log.isPrintLog";
         settings.log.isDebugLog = item == "log.isDebugLog";
         var problems = new List<string>();
@@ -481,7 +481,7 @@ public sealed class LogSettingsInstallTests
         DebugLogs.CollectReleaseProblems(CreateAllDevelopmentSettings(), false, true, problems);
 
         Assert.That(problems.Count, Is.EqualTo(4));
-        Assert.That(problems[0], Is.EqualTo("output.openWindowOnStart"));
+        Assert.That(problems[0], Is.EqualTo("output.startWithWindow"));
         Assert.That(problems[1], Is.EqualTo("log.isPrintLog"));
         Assert.That(problems[2], Is.EqualTo("log.isDebugLog"));
         Assert.That(problems[3], Does.StartWith("TORBEN_LOG_DEBUG"));

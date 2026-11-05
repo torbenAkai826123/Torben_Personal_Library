@@ -7,8 +7,10 @@ namespace Torben
     [System.Serializable]
     public sealed class DebugLogsOptions
     {
-        /// <summary>啟動時是否開啟畫面視窗 (設定 DebugLogs.isGUILog). 視窗元件仍在 AfterSceneLoad 之後才建立.</summary>
-        public bool openWindowOnStart = false;
+        /// <summary>啟動時是否開啟畫面視窗 (設定 DebugLogs.isGUILog). 視窗元件仍在 AfterSceneLoad 之後才建立.
+        /// 舊名稱 openWindowOnStart 的資料仍可讀取. Inspector 畫在 log.isDebugLog 下方 (見 LogSettingsInspector).</summary>
+        [UnityEngine.Serialization.FormerlySerializedAs("openWindowOnStart")]
+        public bool startWithWindow = false;
 
         /// <summary>對應 DebugLogs.isConsoleWithGUI.</summary>
         public bool isConsoleWithGUI = false;
@@ -22,14 +24,14 @@ namespace Torben
         {
             DebugLogs.isConsoleWithGUI = isConsoleWithGUI;
             DebugLogs.isUnityLog = isUnityLog;
-            DebugLogs.isGUILog = openWindowOnStart;
+            DebugLogs.isGUILog = startWithWindow;
         }
 
-        /// <summary>從 DebugLogs 讀取目前狀態; openWindowOnStart 取目前的 isGUILog.</summary>
+        /// <summary>從 DebugLogs 讀取目前狀態; startWithWindow 取目前的 isGUILog.</summary>
         /// <remarks>配置: 每次呼叫配置.</remarks>
         public static DebugLogsOptions Capture() => new DebugLogsOptions
         {
-            openWindowOnStart = DebugLogs.isGUILog,
+            startWithWindow = DebugLogs.isGUILog,
             isConsoleWithGUI = DebugLogs.isConsoleWithGUI,
             isUnityLog = DebugLogs.isUnityLog,
         };

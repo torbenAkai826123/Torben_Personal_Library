@@ -82,6 +82,15 @@ namespace Torben
         /// <summary>對應 DebugWindow.Collapse.</summary>
         public bool collapse = false;
 
+        /// <summary>DebugWindow.History 的容量 (最小 1). 只在啟動 (DebugLogs.Install) 時生效, Apply 不會改變.</summary>
+        [Min(1)] public int logCapacity = 200;
+
+        /// <summary>DebugWindow.UnityHistory 的容量 (最小 1). 只在啟動 (DebugLogs.Install) 時生效, Apply 不會改變.</summary>
+        [Min(1)] public int unityCapacity = 200;
+        
+        /// <summary>對應 DebugWindow.VisibleButtons.</summary>
+        public DebugWindowButtons visibleButtons = DebugWindowButtons.All;
+
         /// <summary>對應 DebugWindow.SetLevelVisible; 沒有列出的等級視為顯示.</summary>
         public LogLevelSwitch[] visibleLevels =
         {
@@ -91,14 +100,6 @@ namespace Torben
             new LogLevelSwitch(LogLevel.Debug, true),
         };
 
-        /// <summary>對應 DebugWindow.VisibleButtons.</summary>
-        public DebugWindowButtons visibleButtons = DebugWindowButtons.All;
-
-        /// <summary>DebugWindow.History 的容量 (最小 1). 只在啟動 (DebugLogs.Install) 時生效, Apply 不會改變.</summary>
-        [Min(1)] public int logCapacity = 200;
-
-        /// <summary>DebugWindow.UnityHistory 的容量 (最小 1). 只在啟動 (DebugLogs.Install) 時生效, Apply 不會改變.</summary>
-        [Min(1)] public int unityCapacity = 200;
 
         /// <summary>對應 DebugWindow.Size (沿用其最小值限制).</summary>
         public Vector2 size = new Vector2(600f, 180f);

@@ -197,7 +197,7 @@ namespace Torben.Editor
 
             var output = effective.output ?? new DebugLogsOptions();
             Header("Output");
-            Row("Open Window On Start", OnOff(output.openWindowOnStart));
+            Row("Start With Window", OnOff(output.startWithWindow));
             Row("Console With GUI", OnOff(output.isConsoleWithGUI));
             Row("Collect Unity Log", OnOff(output.isUnityLog));
 

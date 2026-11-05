@@ -164,7 +164,7 @@ namespace Torben
 
         /// <summary>
         /// 正式版 (非 Development Build) 仍開著的開發設定 (B 類). isDebugBuild 為 true 時不加入任何項目.
-        /// 依序檢查 output.openWindowOnStart、log.isPrintLog、log.isDebugLog、TORBEN_LOG_DEBUG, 符合的項目名稱加入 problems.
+        /// 依序檢查 output.startWithWindow、log.isPrintLog、log.isDebugLog、TORBEN_LOG_DEBUG, 符合的項目名稱加入 problems.
         /// settings 為生效中的設定檔; null (找不到設定檔) 時前三項依欄位初始值判斷.
         /// isDebugSymbolDefined 由 Install 以 Runtime 組件編譯時的 TORBEN_LOG_DEBUG 傳入, 打包成 DLL 時只反映打包當下.
         /// </summary>
@@ -174,7 +174,7 @@ namespace Torben
             if (isDebugBuild) return;
             var output = settings?.output ?? new DebugLogsOptions();
             var log = settings?.log ?? new LogOptions();
-            if (output.openWindowOnStart) problems.Add("output.openWindowOnStart");
+            if (output.startWithWindow) problems.Add("output.startWithWindow");
             if (log.isPrintLog) problems.Add("log.isPrintLog");
             if (log.isDebugLog) problems.Add("log.isDebugLog");
             if (isDebugSymbolDefined) problems.Add("TORBEN_LOG_DEBUG (Log.Debug kept in builds)");
