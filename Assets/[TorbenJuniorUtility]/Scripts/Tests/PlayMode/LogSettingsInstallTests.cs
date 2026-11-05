@@ -123,7 +123,7 @@ public sealed class LogSettingsInstallTests
         settings.window.levelColors = new[] { new LogLevelColor(LogLevel.Normal, "#00FF00") };
         settings.window.visibleLevels = new[] { new LogLevelSwitch(LogLevel.Debug, false) };
         settings.window.showTime = true;
-        settings.window.visibleButtons = DebugWindowButtons.Clear | DebugWindowButtons.Close;
+        settings.window.visibleButtons = DebugWindowButtons.Clear | DebugWindowButtons.Search;
 
         DebugLogs.Install(settings);
 
@@ -143,7 +143,7 @@ public sealed class LogSettingsInstallTests
         Assert.That(DebugWindow.IsLevelVisible(LogLevel.Debug), Is.False);
         Assert.That(DebugWindow.IsLevelVisible(LogLevel.Normal), Is.True);     // 沒有列出的等級視為顯示
         Assert.That(DebugWindow.ShowTime, Is.True);
-        Assert.That(DebugWindow.VisibleButtons, Is.EqualTo(DebugWindowButtons.Clear | DebugWindowButtons.Close));
+        Assert.That(DebugWindow.VisibleButtons, Is.EqualTo(DebugWindowButtons.Clear | DebugWindowButtons.Search));
     }
 
     [Test]
@@ -261,7 +261,8 @@ public sealed class LogSettingsInstallTests
             DebugWindowButtons.None,
             DebugWindowButtons.Levels,
             DebugWindowButtons.Search | DebugWindowButtons.Clear,
-            DebugWindowButtons.All & ~DebugWindowButtons.Close,
+            DebugWindowButtons.Time,    // 第一列不畫, 核取方塊那一列成為第一列 (靠右)
+            DebugWindowButtons.All & ~(DebugWindowButtons.Levels | DebugWindowButtons.Source | DebugWindowButtons.Copy | DebugWindowButtons.Clear),
             DebugWindowButtons.All,
         };
         foreach (var buttons in cases)
@@ -421,6 +422,7 @@ public sealed class LogSettingsInstallTests
     // ---- Development Alert: 正式版仍開著的開發設定 (B 類) ----
 
     private const string ReleaseHeader = "Development settings enabled in a non-development build:";
+    private const string ReleaseLineHead = "Development log settings left on in a non-development build: ";
 
     private LogSettings CreateAllDevelopmentSettings()
     {
@@ -497,7 +499,7 @@ public sealed class LogSettingsInstallTests
         Assert.That(problems[0], Does.StartWith("TORBEN_LOG_DEBUG"));
     }
 
-    // A 類與 B 類同時存在: 合併為一則, 兩段都在
+    // A 類與 B 類同時存在 (Warning): 合併為一則; A 類維持多行, B 類只佔一行
     [Test]
     public void ReleaseAlert_WithSettingsProblems_MergedIntoOneMessage()
     {
@@ -512,6 +514,42 @@ public sealed class LogSettingsInstallTests
         var alerts = System.Array.FindAll(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains(AlertPattern));
         Assert.That(alerts.Length, Is.EqualTo(1));
         var lines = alerts[0].Message.Split('\n');
+        Assert.That(lines[1], Does.StartWith("- window.logCapacity is 0"));
+        Assert.That(lines[2], Is.EqualTo(ReleaseLineHead + "log.isPrintLog (if intentional, set Development Alert to Off in " + settings.name + ")."));
+        Assert.That(lines.Length, Is.EqualTo(3));
+    }
+
+    // 只有 B 類 (Warning): 整則訊息只有一行, 列出所有沒關的項目
+    [Test]
+    public void ReleaseAlert_WarningOnlyReleaseProblems_SingleLine()
+    {
+        var settings = CreateSettings();
+        settings.log.isPrintLog = true;
+        settings.log.isDebugLog = true;
+
+        DebugLogs.Install(settings, false, true);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        LogAssert.NoUnexpectedReceived();
+        string alert = FindAlert();
+        Assert.That(alert, Does.Not.Contain("\n"));
+        Assert.That(alert, Does.StartWith("[Log] " + ReleaseLineHead + "log.isPrintLog, log.isDebugLog, TORBEN_LOG_DEBUG"));
+    }
+
+    // A 類與 B 類同時存在 (Error): 維持多行清單
+    [Test]
+    public void ReleaseAlert_ErrorWithSettingsProblems_KeepsMultiLine()
+    {
+        var settings = CreateSettings();
+        settings.log.isPrintLog = true;
+        settings.window.logCapacity = 0;
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Error;
+        LogAssert.Expect(LogType.Error, new Regex(AlertPattern));
+
+        DebugLogs.Install(settings, false, false);
+
+        LogAssert.NoUnexpectedReceived();
+        var lines = FindAlert().Split('\n');
         Assert.That(lines[1], Does.StartWith("- window.logCapacity is 0"));
         Assert.That(lines[2], Is.EqualTo(ReleaseHeader));
         Assert.That(lines[3], Is.EqualTo("- log.isPrintLog"));
@@ -578,7 +616,7 @@ public sealed class LogSettingsInstallTests
         DebugLogs.Install(settings, false, false);
 
         LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
-        Assert.That(FindAlert(), Does.EndWith("set Development Alert to Off in LogSettings.Default."));
+        Assert.That(FindAlert(), Does.EndWith("set Development Alert to Off in LogSettings.Default)."));
     }
 
     // 訊息包含生效中設定檔的名稱: 覆蓋檔 (檢查的是覆蓋檔的值與等級)
@@ -596,10 +634,10 @@ public sealed class LogSettingsInstallTests
         DebugLogs.Install(defaultSettings, false, false);
 
         LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
-        Assert.That(FindAlert(), Does.EndWith("set Development Alert to Off in GameLogOverride."));
+        Assert.That(FindAlert(), Does.EndWith("set Development Alert to Off in GameLogOverride)."));
     }
 
-    // 找不到設定檔: 併入「LogSettings not found」那一則 (一律 Warning)
+    // 找不到設定檔: 以一行併入「LogSettings not found」那一則 (一律 Warning)
     [Test]
     public void ReleaseAlert_NoSettings_MergedIntoNotFoundWarning()
     {
@@ -608,8 +646,10 @@ public sealed class LogSettingsInstallTests
         LogAssert.Expect(LogType.Warning, new Regex("LogSettings not found"));
         LogAssert.NoUnexpectedReceived();
         var report = System.Array.Find(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains("LogSettings not found")).Message;
-        Assert.That(report, Does.Contain(ReleaseHeader));
-        Assert.That(report, Does.Contain("\n- TORBEN_LOG_DEBUG"));
+        var lines = report.Split('\n');
+        Assert.That(lines.Length, Is.EqualTo(2));
+        Assert.That(lines[1], Does.StartWith(ReleaseLineHead + "TORBEN_LOG_DEBUG"));
+        Assert.That(lines[1], Does.EndWith("(if intentional, create the settings file and set Development Alert to Off)."));
     }
 
     // sink 例外隔離: Install 設定 SinkErrorHandler, 以 LogException 輸出 (含 sink 型別名稱), 只有第一次

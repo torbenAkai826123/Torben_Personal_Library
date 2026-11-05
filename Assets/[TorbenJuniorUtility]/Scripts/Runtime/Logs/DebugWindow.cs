@@ -13,15 +13,27 @@ namespace Torben
         private const int WindowId = 0x4C4F47;
         private const float Margin = 10f;
         private const float TitleBarHeight = 18f;
+        private const float MinWidth = 150f;          // 標題文字不與圓點重疊的最小寬度
+        private const float MinHeight = 60f;
         private const float ReferenceHeight = 720f;   // 自動縮放時, 畫面高 720 為 1 倍
         private const float FoldWidth = 18f;          // 每筆左側展開按鈕的寬度
         private const float BadgeHeight = 16f;        // 合併次數膠囊的高度
         private const float CheckSize = 14f;          // 第二列核取方塊 (Time / Loc / Collapse / Auto) 的方框大小
         private const float FoldHeight = 14f;         // 展開按鈕的高度
+        private const float RowGap = 2f;              // 每列左緣與行號、行號與展開按鈕之間的距離
+        private const float TextGap = 4f;             // 展開 (或複製) 按鈕與文字之間的距離
         private static readonly Color separatorColor = new Color(1f, 1f, 1f, 0.12f);   // 列分隔線
         private const float DetailOffset = 2f;        // 第二行與訊息之間多留的距離
         private const float CopiedFeedbackSeconds = 1f;   // 按下複製後顯示已複製狀態的時間
+        private const string WindowTitle = "Log";
+        private const float DotSize = 12f;            // 標題列紅黃綠圓點的直徑
+        private const float DotSpacing = 6f;          // 圓點之間的距離
+        private const float DotRightMargin = 6f;      // 最右邊的圓點與視窗右緣的距離
+        private const float DotRingWidth = 1.5f;      // 綠點關閉時的圓線粗細
         private static readonly Color copiedColor = new Color(0.45f, 0.85f, 0.45f);    // 已複製狀態的按鈕底色
+        private static readonly Color closeDotColor = new Color32(255, 95, 87, 255);       // 紅: Close
+        private static readonly Color minimizeDotColor = new Color32(254, 188, 46, 255);   // 黃: 縮小 / 還原
+        private static readonly Color autoDotColor = new Color32(40, 200, 64, 255);        // 綠: Auto (開: 實心, 關: 圓線)
 
         private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
         private static readonly int levelCount = levelNames.Length;
@@ -41,6 +53,9 @@ namespace Torben
         private static bool hasCustomPosition;  // false = 預設右下角
         private static bool draggable;
         private static bool autoScroll;
+        private static bool minimized;          // 縮小成只剩標題列
+        private static bool minimizedToBottom;  // 縮小時往下縮 (標題列停在原本視窗的底部); 還原時往上展開
+        private static float minimizedHeight = TitleBarHeight + 4f;    // 縮小時的視窗高度; 建立樣式時依視窗背景的邊框修正
         private static float scale;             // 0 = 依畫面高度自動
         private static string searchText;
         private static bool[] levelVisible;
@@ -102,6 +117,19 @@ namespace Torben
         private GUIStyle checkStyle;        // 核取方塊的文字 (左側留出方框位置)
         private Texture2D checkOffTexture;
         private Texture2D checkOnTexture;
+        private Texture2D dotTexture;       // 白色實心圓, 以 GUI.color 上色
+        private Texture2D ringTexture;      // 白色圓線, 以 GUI.color 上色
+        private GUIStyle minimizedTitleStyle;   // 縮小時自己畫的標題文字
+        private GUIStyle rowCopyStyle;      // 每列的複製按鈕: 同展開按鈕, 但放在第二行 / 堆疊行時不加上邊距
+        private bool pendingMinimizeToggle;
+        private bool checksOnFirstRow = true;   // 本次 Layout 時核取方塊是否放在第一列
+        private float levelsWidth;              // 工具列元件寬度, 見 MeasureToolbar
+        private float sourceWidth;
+        private float copyWidth;
+        private float clearWidth;
+        private float timeWidth;
+        private float locationWidth;
+        private float collapseWidth; // 按下黃點後, 下一次 Layout 才切換, 避免同一事件內版面改變
         private GUIContent[] levelToggleLabels;
         private GUIContent sourceBothLabel;     // 來源按鈕: 依目前狀態顯示, 點擊輪替 Unity -> Unity Off -> Both
         private GUIContent sourceUnityLabel;
@@ -112,11 +140,9 @@ namespace Torben
         private GUIContent copiedAllLabel;
         private GUIContent copyRowLabel;
         private GUIContent copiedRowLabel;
-        private GUIContent closeLabel;
         private GUIContent timeLabel;
         private GUIContent locationLabel;
         private GUIContent collapseLabel;
-        private GUIContent autoScrollLabel;
         private GUIContent expandRowLabel;
         private GUIContent collapseRowLabel;
         private bool dragging;
@@ -148,13 +174,13 @@ namespace Torben
         /// <remarks>配置: 零配置.</remarks>
         public static int UnityCapacity => unityCapacity;
 
-        /// <summary>視窗大小 (縮放前的單位). 預設值見 DebugWindowOptions 欄位初始值; 最小 80 x 60.
+        /// <summary>視窗大小 (縮放前的單位). 預設值見 DebugWindowOptions 欄位初始值; 最小 150 x 60 (寬度小於 150 時標題文字會與圓點重疊).
         /// 開啟視窗時, 寬或高超過畫面的那一邊會改為畫面該方向的一半.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static Vector2 Size
         {
             get => size;
-            set => size = new Vector2(Mathf.Max(80f, value.x), Mathf.Max(60f, value.y));
+            set => size = new Vector2(Mathf.Max(MinWidth, value.x), Mathf.Max(MinHeight, value.y));
         }
 
         /// <summary>視窗左上角位置 (縮放前的單位). 設定後不再自動貼齊右下角; 拖曳也會更新此值.
@@ -185,12 +211,50 @@ namespace Torben
             set => draggable = value;
         }
 
-        /// <summary>有新訊息時是否自動捲到最下方; 由關轉開時立即捲到最下方. 視窗的 Auto 開關同步此設定.</summary>
+        /// <summary>有新訊息時是否自動捲到最下方; 由關轉開時立即捲到最下方. 標題列的綠點同步此設定 (開: 實心, 關: 圓線).</summary>
         public static bool AutoScroll
         {
             get => autoScroll;
             set => autoScroll = value;
         }
+
+        /// <summary>
+        /// 視窗是否縮小成只剩標題列 (保留紅黃綠圓點, 位置不變, 仍可拖曳). 標題列的黃點切換此設定.
+        /// 不存進設定檔; 進入 Play (DebugLogs.Install) 時重設為 false. 縮小時不更新清單內容, 還原後才更新.
+        /// </summary>
+        /// <remarks>配置: 零配置.</remarks>
+        public static bool Minimized
+        {
+            get => minimized;
+            set => SetMinimized(value);
+        }
+
+        // 縮小時往較近的上下邊縮: 視窗中心在畫面下半部時往下縮 (標題列停在原本視窗的底部), 否則往上縮.
+        // 還原時反向展開; 縮小 / 還原後都把超出畫面的部分拉回. 預設位置 (右下角) 依目前高度計算, 不需調整
+        private static void SetMinimized(bool value)
+        {
+            if (value == minimized) return;
+            float shift = size.y - minimizedHeight;
+            if (value)
+            {
+                float screenHeight = Screen.height / EffectiveScale();
+                minimizedToBottom = Position.y + size.y * 0.5f > screenHeight * 0.5f;
+                minimized = true;
+                if (hasCustomPosition && minimizedToBottom) position.y += shift;
+            }
+            else
+            {
+                minimized = false;
+                if (hasCustomPosition && minimizedToBottom) position.y -= shift;
+            }
+            FitToScreen();
+        }
+
+        // 目前畫出的視窗高度 (縮小時只有標題列)
+        private static float WindowHeight() => minimized ? minimizedHeight : size.y;
+
+        // 測試用: 目前畫出的視窗高度
+        internal static float CurrentHeight => WindowHeight();
 
         /// <summary>介面縮放倍率; 0 表示依畫面高度自動計算 (畫面高 720 為 1 倍, 最小 1 倍).</summary>
         public static float Scale
@@ -302,7 +366,7 @@ namespace Torben
 
         /// <summary>
         /// 視窗上顯示哪些按鈕. 隱藏的只是按鈕, 功能仍可透過對應的靜態屬性控制; 隱藏後版面不留空位.
-        /// 隱藏 Close 時, 觸控裝置上無法用按鈕關閉視窗 (需由程式關閉 DebugLogs.isGUILog).
+        /// 標題列的紅 (Close)、黃 (縮小)、綠 (Auto) 圓點固定顯示, 不受此設定控制.
         /// </summary>
         /// <remarks>配置: 零配置.</remarks>
         public static DebugWindowButtons VisibleButtons
@@ -329,6 +393,8 @@ namespace Torben
             levelColors = new string[levelCount];
             filterVersion = 0;
             styleVersion = 0;
+            minimized = false;
+            minimizedToBottom = false;
             new DebugWindowOptions().Apply();
             return history;
         }
@@ -387,11 +453,9 @@ namespace Torben
             copiedAllLabel = new GUIContent("Copied", "Copied all visible messages");
             copyRowLabel = new GUIContent("C", "Copy this message");
             copiedRowLabel = new GUIContent("C", "Copied");
-            closeLabel = new GUIContent("X", "Close");
             timeLabel = new GUIContent("Time", "Show time");
             locationLabel = new GUIContent("Loc", "Show source location");
             collapseLabel = new GUIContent("Collapse", "Collapse identical messages");
-            autoScrollLabel = new GUIContent("Auto", "Auto scroll to newest");
             expandRowLabel = new GUIContent("+", "Expand");
             collapseRowLabel = new GUIContent("-", "Fold");
 #if UNITY_EDITOR
@@ -404,6 +468,8 @@ namespace Torben
             if (badgeTexture != null) Destroy(badgeTexture);
             if (checkOffTexture != null) Destroy(checkOffTexture);
             if (checkOnTexture != null) Destroy(checkOnTexture);
+            if (dotTexture != null) Destroy(dotTexture);
+            if (ringTexture != null) Destroy(ringTexture);
             // CrossObject 被銷毀時一併清掉參照; 下次開啟會重新建立
             if (current == this) current = null;
         }
@@ -413,12 +479,21 @@ namespace Torben
             if (history == null || unityHistory == null) return;
             if (lineStyle == null) CreateStyles();
 
+            // 縮小 / 還原在 Layout 時才套用, 讓同一事件的 Layout 與其他事件畫出相同的版面
+            if (pendingMinimizeToggle && Event.current.type == EventType.Layout)
+            {
+                pendingMinimizeToggle = false;
+                SetMinimized(!minimized);
+            }
+
             float s = EffectiveScale();
             var oldMatrix = GUI.matrix;
             GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
 
-            var rect = new Rect(Position, size);
-            var moved = GUI.Window(WindowId, rect, drawWindow, "Log");
+            // 縮小時只留標題列; 位置 (左上角) 不變, 還原後回到原本大小
+            var rect = new Rect(Position, new Vector2(size.x, WindowHeight()));
+            // 縮小時視窗太矮, 內建的標題文字會被裁掉; 改在 DrawWindow 中自己畫
+            var moved = GUI.Window(WindowId, rect, drawWindow, minimized ? string.Empty : WindowTitle);
             if (draggable && moved.position != rect.position)
             {
                 Position = moved.position;
@@ -439,17 +514,31 @@ namespace Torben
         {
             // 只在 Layout 事件更新資料, 讓 Layout 與 Repaint 畫出的控制項數量一致
             var e = Event.current;
-            if (e.type == EventType.Layout) Refresh();
             if (e.type == EventType.Repaint) DrawnCopyButtons = 0;
-
-            // 先記下按下位置: 其他控制項處理後會把事件標成 Used, 到 Clear 時就讀不到了
+            // 先記下按下位置: 其他控制項 (含圓點) 處理後會把事件標成 Used, 到 Clear 時就讀不到了
             bool isMouseDown = e.type == EventType.MouseDown && new Rect(Vector2.zero, size).Contains(e.mousePosition);
             Vector2 mouseDownPosition = e.mousePosition;
 
-            // 隱藏的按鈕不佔位置; 第一列的按鈕全部隱藏時整列不畫
+            if (minimized && e.type == EventType.Repaint)
+                GUI.Label(new Rect(0f, 0f, size.x, minimizedHeight), WindowTitle, minimizedTitleStyle);
+            // 標題列的圓點固定顯示; 先畫, 按下時事件被用掉, 不會觸發拖曳
+            DrawTitleDots();
+            if (minimized)
+            {
+                if (draggable) GUI.DragWindow(new Rect(0f, 0f, 10000f, minimizedHeight));
+                return;
+            }
+            if (e.type == EventType.Layout) Refresh();
+
+            // 第一列: 左邊為按鈕, 右邊為核取方塊; 寬度放不下時核取方塊移到第二列 (靠左); 搜尋框自成最後一列.
+            // 隱藏的按鈕不佔位置; 一列沒有東西時整列不畫. 放第幾列只在 Layout 時決定
             var buttons = visibleButtons;
-            const DebugWindowButtons firstRow = DebugWindowButtons.Levels | DebugWindowButtons.Source | DebugWindowButtons.Copy | DebugWindowButtons.Clear | DebugWindowButtons.Close;
-            if ((buttons & firstRow) != 0)
+            bool hasLeft = (buttons & LeftButtons) != 0;
+            bool hasChecks = (buttons & CheckButtons) != 0;
+            if (e.type == EventType.Layout)
+                checksOnFirstRow = !hasLeft || LeftWidth(buttons) + ChecksWidth(buttons) <= size.x - GUI.skin.window.padding.horizontal;
+            bool checksFirst = hasChecks && checksOnFirstRow;
+            if (hasLeft || checksFirst)
             {
                 GUILayout.BeginHorizontal();
                 if (HasButton(buttons, DebugWindowButtons.Levels))
@@ -461,22 +550,20 @@ namespace Torben
                     }
                 }
                 if (HasButton(buttons, DebugWindowButtons.Source)) DrawSourceButton();
-                GUILayout.FlexibleSpace();
                 if (drawCopy) DrawCopyAllButton();
                 if (HasButton(buttons, DebugWindowButtons.Clear)) DrawClearButton(isMouseDown, mouseDownPosition);
-                if (HasButton(buttons, DebugWindowButtons.Close) && GUILayout.Button(closeLabel))
-                    DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
+                GUILayout.FlexibleSpace();
+                if (checksFirst) DrawCheckBoxes(buttons);
                 GUILayout.EndHorizontal();
             }
-
-            GUILayout.BeginHorizontal();
+            if (hasChecks && !checksFirst)
+            {
+                GUILayout.BeginHorizontal();
+                DrawCheckBoxes(buttons);    // 換到第二列時靠左
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+            }
             if (HasButton(buttons, DebugWindowButtons.Search)) SearchText = GUILayout.TextField(searchText);
-            else GUILayout.FlexibleSpace();     // 沒有搜尋框時開關靠右, 與有搜尋框時的位置相同
-            if (HasButton(buttons, DebugWindowButtons.Time)) ShowTime = CheckBox(showTime, timeLabel);
-            if (HasButton(buttons, DebugWindowButtons.Location)) ShowLocation = CheckBox(showLocation, locationLabel);
-            if (HasButton(buttons, DebugWindowButtons.Collapse)) Collapse = CheckBox(collapse, collapseLabel);
-            autoScroll = CheckBox(autoScroll, autoScrollLabel);
-            GUILayout.EndHorizontal();
 
             scroll = GUILayout.BeginScrollView(scroll);
             for (int row = 0; row < visibleCount; row++) DrawRow(row);
@@ -486,6 +573,70 @@ namespace Torben
         }
 
         private static bool HasButton(DebugWindowButtons buttons, DebugWindowButtons button) => (buttons & button) != 0;
+
+        private const DebugWindowButtons LeftButtons = DebugWindowButtons.Levels | DebugWindowButtons.Source | DebugWindowButtons.Copy | DebugWindowButtons.Clear;
+        private const DebugWindowButtons CheckButtons = DebugWindowButtons.Time | DebugWindowButtons.Location | DebugWindowButtons.Collapse;
+
+        private void DrawCheckBoxes(DebugWindowButtons buttons)
+        {
+            if (HasButton(buttons, DebugWindowButtons.Time)) ShowTime = CheckBox(showTime, timeLabel);
+            if (HasButton(buttons, DebugWindowButtons.Location)) ShowLocation = CheckBox(showLocation, locationLabel);
+            if (HasButton(buttons, DebugWindowButtons.Collapse)) Collapse = CheckBox(collapse, collapseLabel);
+        }
+
+        // 工具列各元件的寬度 (含左右邊距, 略為高估); 建立樣式時量一次. 會變的文字取最寬的那個, 點擊後版面不跳動
+        private void MeasureToolbar()
+        {
+            var toggle = GUI.skin.toggle;
+            var button = GUI.skin.button;
+            levelsWidth = 0f;
+            foreach (var label in levelToggleLabels) levelsWidth += toggle.CalcSize(label).x + toggle.margin.horizontal;
+            sourceWidth = Mathf.Max(Mathf.Max(button.CalcSize(sourceBothLabel).x, button.CalcSize(sourceUnityLabel).x),
+                                    Mathf.Max(button.CalcSize(sourceLogLabel).x, button.CalcSize(sourceNoneLabel).x)) + button.margin.horizontal;
+            copyWidth = Mathf.Max(button.CalcSize(copyAllLabel).x, button.CalcSize(copiedAllLabel).x) + button.margin.horizontal;
+            clearWidth = button.CalcSize(clearLabel).x + button.margin.horizontal;
+            timeWidth = checkStyle.CalcSize(timeLabel).x + checkStyle.margin.horizontal;
+            locationWidth = checkStyle.CalcSize(locationLabel).x + checkStyle.margin.horizontal;
+            collapseWidth = checkStyle.CalcSize(collapseLabel).x + checkStyle.margin.horizontal;
+        }
+
+        private float LeftWidth(DebugWindowButtons buttons) =>
+            (HasButton(buttons, DebugWindowButtons.Levels) ? levelsWidth : 0f)
+            + (HasButton(buttons, DebugWindowButtons.Source) ? sourceWidth : 0f)
+            + (HasButton(buttons, DebugWindowButtons.Copy) ? copyWidth : 0f)
+            + (HasButton(buttons, DebugWindowButtons.Clear) ? clearWidth : 0f);
+
+        private float ChecksWidth(DebugWindowButtons buttons) =>
+            (HasButton(buttons, DebugWindowButtons.Time) ? timeWidth : 0f)
+            + (HasButton(buttons, DebugWindowButtons.Location) ? locationWidth : 0f)
+            + (HasButton(buttons, DebugWindowButtons.Collapse) ? collapseWidth : 0f);
+
+        // 標題列右側的紅 (Close)、黃 (縮小 / 還原)、綠 (Auto) 圓點; 固定顯示, 不受 VisibleButtons 控制
+        private void DrawTitleDots()
+        {
+            float step = DotSize + DotSpacing;
+            float x = size.x - DotRightMargin - DotSize - step * 2f;
+            float y = (TitleBarHeight - DotSize) * 0.5f;
+            if (TitleDot(new Rect(x, y, DotSize, DotSize), closeDotColor, true))
+                DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
+            if (TitleDot(new Rect(x + step, y, DotSize, DotSize), minimizeDotColor, true))
+                pendingMinimizeToggle = true;
+            if (TitleDot(new Rect(x + step * 2f, y, DotSize, DotSize), autoDotColor, autoScroll))
+                autoScroll = !autoScroll;
+        }
+
+        // 一個圓點按鈕: 點擊範圍比圓點大一圈 (方便觸控); 滑過時稍微變亮. isFilled 為 false 時畫圓線
+        private bool TitleDot(Rect dot, Color color, bool isFilled)
+        {
+            var hit = new Rect(dot.x - DotSpacing * 0.5f, 0f, dot.width + DotSpacing, TitleBarHeight);
+            bool clicked = GUI.Button(hit, GUIContent.none, GUIStyle.none);
+            if (Event.current.type != EventType.Repaint) return clicked;
+            var oldColor = GUI.color;
+            GUI.color = hit.Contains(Event.current.mousePosition) ? color * new Color(1.15f, 1.15f, 1.15f, 1f) : color;
+            GUI.DrawTexture(dot, isFilled ? dotTexture : ringTexture);
+            GUI.color = oldColor;
+            return clicked;
+        }
 
         // 依目前的歷史紀錄配置快照與可見清單; 紀錄換新時 (啟動或重新安裝, 容量可能不同) 才重新配置
         private void BindHistories()
@@ -516,7 +667,8 @@ namespace Torben
 
         private void CreateStyles()
         {
-            lineStyle = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true, margin = new RectOffset(2, 2, 0, 0) };
+            // 每列內元件的左邊距為 0, 水平間距一律由 DrawRow / RowLeft 的 GUILayout.Space 指定, 讓各行文字左緣一致
+            lineStyle = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true, margin = new RectOffset(0, 2, 0, 0) };
             // 字型大小 0 表示用字型預設大小; 第二行比主訊息小一級 (2 點)
             int baseSize = lineStyle.fontSize > 0 ? lineStyle.fontSize
                 : GUI.skin.font != null && GUI.skin.font.fontSize > 0 ? GUI.skin.font.fontSize : 13;
@@ -530,9 +682,10 @@ namespace Torben
             // 第一行左右的小元件 (行號、展開按鈕、次數膠囊) 都以訊息第一行文字的中線置中
             float textCenter = lineStyle.padding.top + lineStyle.lineHeight * 0.5f;
             foldStyle = new GUIStyle(GUI.skin.button) { fontSize = detailSize, padding = new RectOffset(0, 0, 0, 0), fixedHeight = FoldHeight };
-            foldStyle.margin = new RectOffset(2, 2, CenterOffset(textCenter, FoldHeight), 0);
+            foldStyle.margin = new RectOffset(0, 0, CenterOffset(textCenter, FoldHeight), 0);
+            rowCopyStyle = new GUIStyle(foldStyle) { margin = new RectOffset(0, 0, 0, 0) };
             numberStyle = new GUIStyle(inlineDetailStyle);
-            numberStyle.margin = new RectOffset(2, 0, CenterOffset(textCenter, numberStyle.padding.top * 2f + numberStyle.lineHeight), 0);
+            numberStyle.margin = new RectOffset(0, 0, CenterOffset(textCenter, numberStyle.padding.top * 2f + numberStyle.lineHeight), 0);
             numberDigits = 0;   // 行號欄寬在 Refresh 中依目前最大的流水號計算
 
             badgeTexture = CreateCapsuleTexture(BadgeHeight);
@@ -550,12 +703,26 @@ namespace Torben
             badgeStyle.normal.background = badgeTexture;
             badgeStyle.normal.textColor = Color.white;
 
+            minimizedHeight = Mathf.Max(TitleBarHeight + 4f, GUI.skin.window.border.vertical);    // 太矮時視窗背景的九宮格會變形
+            minimizedTitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                font = GUI.skin.window.font,
+                fontSize = GUI.skin.window.fontSize,
+                alignment = TextAnchor.MiddleCenter,
+                padding = new RectOffset(0, 0, 0, 0),
+                wordWrap = false,
+            };
+            minimizedTitleStyle.normal.textColor = GUI.skin.window.normal.textColor;
+            // 圓點以 2 倍解析度產生, 視窗放大 2 倍時仍清楚
+            dotTexture = CreateDotTexture(DotSize * 2f, 0f);
+            ringTexture = CreateDotTexture(DotSize * 2f, DotRingWidth * 2f);
             checkOffTexture = CreateCheckTexture(CheckSize, false);
             checkOnTexture = CreateCheckTexture(CheckSize, true);
             checkStyle = new GUIStyle(GUI.skin.label) { wordWrap = false, alignment = TextAnchor.MiddleLeft };
             checkStyle.padding.left = Mathf.CeilToInt(CheckSize) + 4;
             checkStyle.margin = new RectOffset(6, 2, GUI.skin.textField.margin.top, GUI.skin.textField.margin.bottom);
             checkStyle.fixedHeight = Mathf.Max(CheckSize, GUI.skin.textField.CalcHeight(GUIContent.none, 100f));   // 與搜尋框同高
+            MeasureToolbar();
         }
 
         // 方形核取方塊: 左側畫方框 (開啟時打勾), 右側為文字; 點擊方框或文字都會切換
@@ -596,6 +763,35 @@ namespace Torben
                     float dy = y + 0.5f - radius;
                     float alpha = Mathf.Clamp01(radius - Mathf.Sqrt(dx * dx + dy * dy) + 0.5f);   // 邊緣 1px 反鋸齒
                     pixels[y * size + x] = new Color32(110, 110, 110, (byte)(alpha * 220f));
+                }
+            }
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        // 白色圓形 (以 GUI.color 上色); ringWidth 為 0 時實心, 否則為該粗細的圓線. 邊緣做反鋸齒
+        private static Texture2D CreateDotTexture(float diameter, float ringWidth)
+        {
+            int size = Mathf.CeilToInt(diameter);
+            float radius = size / 2f;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x + 0.5f - radius;
+                    float dy = y + 0.5f - radius;
+                    float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                    float alpha = Mathf.Clamp01(radius - distance + 0.5f);
+                    if (ringWidth > 0f) alpha = Mathf.Min(alpha, Mathf.Clamp01(distance - (radius - ringWidth) + 0.5f));
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
                 }
             }
             texture.SetPixels32(pixels);
@@ -649,7 +845,9 @@ namespace Torben
             return Vector2.Distance(p, a + ab * t);
         }
 
-        // 一筆 (或合併後的一組) 訊息: 第一行為行號 + 展開按鈕 + 訊息 (+ 合併次數); 第二行為時間與位置; 展開時顯示堆疊追蹤
+        // 一筆 (或合併後的一組) 訊息: 第一行為行號 + 展開按鈕 + 訊息 (+ 合併次數); 第二行為時間與位置; 展開時顯示堆疊追蹤.
+        // 複製按鈕不另佔一欄, 依序放在: 第二行左側 > 展開後堆疊第一行左側 > 沒有堆疊時取代展開按鈕;
+        // 有堆疊但未展開且沒有第二行時不畫 (展開後才出現). 前兩者與展開按鈕同一欄
         private void DrawRow(int row)
         {
             if (row > 0) DrawSeparator();
@@ -657,53 +855,77 @@ namespace Torben
             var source = SourceOf(index, out int i);
             var stackTrace = source.Snapshot[i].StackTrace;
             int count = rowsCollapsed ? groupCount[groupOf[index]] : 1;
+            // 合併多次的訊息不顯示時間 (每次出現的時間不同, 只顯示一個沒有意義)
+            bool rowTime = drawTime && count == 1;
+            bool hasSecondLine = rowTime || drawLocation;
+            bool isExpanded = rowExpanded[row] && stackTrace != null;
 
             GUILayout.BeginHorizontal();
+            GUILayout.Space(RowGap);
             GUILayout.Label(source.GetNumber(i), numberStyle);
-            bool oldEnabled = GUI.enabled;
-            GUI.enabled = oldEnabled && stackTrace != null;   // 沒有堆疊追蹤時呈現無法使用
-            if (GUILayout.Button(rowExpanded[row] ? collapseRowLabel : expandRowLabel, foldStyle, GUILayout.Width(FoldWidth)))
-                pendingToggleRow = row;
-            GUI.enabled = oldEnabled;
-            if (drawCopy) DrawCopyRowButton(row, count);
+            GUILayout.Space(RowGap);
+            if (drawCopy && stackTrace == null && !hasSecondLine)
+            {
+                DrawCopyRowButton(row, foldStyle);
+            }
+            else
+            {
+                bool oldEnabled = GUI.enabled;
+                GUI.enabled = oldEnabled && stackTrace != null;   // 沒有堆疊追蹤時呈現無法使用
+                if (GUILayout.Button(rowExpanded[row] ? collapseRowLabel : expandRowLabel, foldStyle, GUILayout.Width(FoldWidth)))
+                    pendingToggleRow = row;
+                GUI.enabled = oldEnabled;
+            }
+            GUILayout.Space(TextGap);
             GUILayout.Label(source.Lines[i], lineStyle);
             if (count > 1) GUILayout.Label(CountNumberText(count), badgeStyle, GUILayout.ExpandWidth(false));
             GUILayout.EndHorizontal();
 
-            // 合併多次的訊息不顯示時間 (每次出現的時間不同, 只顯示一個沒有意義)
-            bool rowTime = drawTime && count == 1;
-            if (rowTime || drawLocation)
+            if (hasSecondLine)
             {
                 string location = drawLocation ? source.GetLocation(i, projectRoot) : string.Empty;
                 GUILayout.Space(DetailOffset);
                 GUILayout.BeginHorizontal();
-                GUILayout.Space(RowIndent());
+                RowLeft(row, drawCopy);
                 if (rowTime) GUILayout.Label(source.GetTime(i), inlineDetailStyle, GUILayout.ExpandWidth(false));
                 if (location.Length > 0) DrawLocation(source, i, location);
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
             }
 
-            if (rowExpanded[row] && stackTrace != null)
+            if (isExpanded)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Space(RowIndent());
+                RowLeft(row, drawCopy && !hasSecondLine);
                 GUILayout.Label(stackTrace.Text, detailStyle);
                 GUILayout.EndHorizontal();
             }
         }
 
-        // 第二行與展開內容的左側縮排: 行號 + 展開按鈕 (+ 複製按鈕) 與其邊距
-        private float RowIndent() => numberStyle.fixedWidth + FoldWidth + 6f + (drawCopy ? FoldWidth + 4f : 0f);
+        // 第二行與展開內容的左側縮排 = 第一行訊息文字的左緣: 間距 + 行號 + 間距 + 展開按鈕 + 間距
+        private float RowIndent() => RowGap + numberStyle.fixedWidth + RowGap + FoldWidth + TextGap;
 
-        // 每一列的複製按鈕: 位置與尺寸同展開按鈕; 按下後約 1 秒顯示已複製狀態 (底色)
-        private void DrawCopyRowButton(int row, int count)
+        // 第二行 / 堆疊行的左側: 縮排; withCopy 時在展開按鈕那一欄畫複製按鈕
+        private void RowLeft(int row, bool withCopy)
+        {
+            if (!withCopy)
+            {
+                GUILayout.Space(RowIndent());
+                return;
+            }
+            GUILayout.Space(RowGap + numberStyle.fixedWidth + RowGap);
+            DrawCopyRowButton(row, rowCopyStyle);
+            GUILayout.Space(TextGap);
+        }
+
+        // 每一列的複製按鈕: 尺寸同展開按鈕; 按下後約 1 秒顯示已複製狀態 (底色)
+        private void DrawCopyRowButton(int row, GUIStyle style)
         {
             if (Event.current.type == EventType.Repaint) DrawnCopyButtons++;
             bool isCopied = drawCopiedSequence >= 0 && drawCopiedSequence == SequenceOf(visible[row]);
             var oldColor = GUI.backgroundColor;
             if (isCopied) GUI.backgroundColor = copiedColor;
-            if (GUILayout.Button(isCopied ? copiedRowLabel : copyRowLabel, foldStyle, GUILayout.Width(FoldWidth))) CopyRow(row);
+            if (GUILayout.Button(isCopied ? copiedRowLabel : copyRowLabel, style, GUILayout.Width(FoldWidth))) CopyRow(row);
             GUI.backgroundColor = oldColor;
         }
 
@@ -753,6 +975,12 @@ namespace Torben
 
         // 測試用: 上次 Repaint 畫出的複製按鈕數 (每一列 + 工具列)
         internal int DrawnCopyButtons { get; private set; }
+
+        // 測試用: 上次 Layout 時核取方塊是否放在工具列第一列
+        internal bool ChecksOnFirstRow => checksOnFirstRow;
+
+        // 測試用: 與按下第 row 列的展開按鈕相同 (下一次 Layout 才套用)
+        internal void RequestToggleRow(int row) => pendingToggleRow = row;
 
         // 列與列之間 1px 的分隔線, 也當對齊的參考線
         private static void DrawSeparator()
@@ -841,7 +1069,7 @@ namespace Torben
 
         private void DrawClearButton(bool isMouseDown, Vector2 mouseDownPosition)
         {
-            var rect = GUILayoutUtility.GetRect(clearLabel, GUI.skin.button);
+            var rect = GUILayoutUtility.GetRect(clearLabel, GUI.skin.button, GUILayout.ExpandWidth(false));
             if (isMouseDown)
             {
                 if (rect.Contains(mouseDownPosition)) clearPressed = clearArmed;
@@ -1031,7 +1259,7 @@ namespace Torben
         }
 
         private static Vector2 DefaultPosition(float s) =>
-            new Vector2(Mathf.Max(0f, Screen.width / s - size.x - Margin), Mathf.Max(0f, Screen.height / s - size.y - Margin));
+            new Vector2(Mathf.Max(0f, Screen.width / s - size.x - Margin), Mathf.Max(0f, Screen.height / s - WindowHeight() - Margin));
 
         // 一份歷史紀錄的快照與已格式化字串; 陣列長度為該紀錄的容量
         private sealed class Source
@@ -1187,7 +1415,7 @@ namespace Torben
             if (size.y > screenHeight) size.y = screenHeight * 0.5f;
             if (!hasCustomPosition) return;    // 預設位置 (右下角) 每次繪製都依畫面重新計算
             position.x = Mathf.Clamp(position.x, 0f, screenWidth - size.x);
-            position.y = Mathf.Clamp(position.y, 0f, screenHeight - size.y);
+            position.y = Mathf.Clamp(position.y, 0f, screenHeight - WindowHeight());   // 縮小時以標題列的高度判斷
         }
     }
 

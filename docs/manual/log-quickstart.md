@@ -87,7 +87,10 @@ AddButton("GUI Status " + (DebugLogs.isGUILog ? "ON" : "OFF"),
   - 第一次按下後按鈕變黃，進入清除狀態，訊息還不會清掉。
   - 清除狀態下再按一次才會清除 (按住時變紅，放開後恢復原色)；按住後移到按鈕外再放開則不清除。
   - 清除狀態下點視窗中其他位置即取消。
-- 按 **X** 關閉視窗，效果同 `DebugLogs.isGUILog = false` (Console 恢復輸出)。
+- 標題列右上角的三個圓點固定顯示，不能隱藏：
+  - **紅**：關閉視窗，效果同 `DebugLogs.isGUILog = false` (Console 恢復輸出)。
+  - **黃**：縮小成只剩標題列 (仍可拖曳)，再按一次還原。
+  - **綠**：自動捲到最新訊息。實心為開啟，只剩圓線為關閉。
 
 開啟視窗時，若寬或高超過畫面，該方向會縮成畫面的一半；位置超出畫面也會拉回邊緣。
 
@@ -100,6 +103,7 @@ DebugWindow.Position = new Vector2(10, 10);   // DebugWindow.ResetPosition() 回
 DebugWindow.IsDraggable = false;	// 調整是否拖曳
 DebugWindow.SearchText = "Network";	// 比對文字顯示
 DebugWindow.Scale = 2f;                        // 0 = 依畫面高度自動 (高 720 為 1 倍)
+DebugWindow.Minimized = true;                  // 縮小成只剩標題列 (同黃點)
 
 // 自訂訊息層級的顏色: DebugWindow.SetLevelColor(訊息層級, 指定顏色(Hex))
 DebugWindow.SetLevelColor(LogLevel.Normal, "#FFFFFF");

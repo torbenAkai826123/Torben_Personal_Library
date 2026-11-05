@@ -34,6 +34,7 @@ public sealed class DebugWindowTests
         DebugWindow.ShowLocation = false;
         DebugWindow.Collapse = false;
         DebugWindow.AutoScroll = true;
+        DebugWindow.Minimized = false;
         DebugWindow.VisibleButtons = DebugWindowButtons.All;
         DebugWindow.ResetPosition();
         DebugWindow.SearchText = string.Empty;
@@ -445,5 +446,175 @@ public sealed class DebugWindowTests
         yield return null;
         yield return null;
         Assert.That(OpenedWindow().DrawnCopyButtons, Is.EqualTo(0));
+    }
+
+    // 每列的複製按鈕: 沒有堆疊也沒有第二行時取代展開按鈕 (上方 Copy_ButtonsFollowCopyFlag);
+    // 有堆疊時收合不畫, 展開後畫在堆疊第一行; 有第二行 (Time) 時一律畫在第二行
+    [UnityTest]
+    public IEnumerator Copy_RowButton_FollowsExpandAndSecondLine()
+    {
+        DebugLogs.isGUILog = true;
+        Log.Error("broken");    // Error 預設擷取堆疊
+        yield return null;
+        yield return null;
+        var window = OpenedWindow();
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(1), "收合且沒有第二行: 只有工具列");
+
+        window.RequestToggleRow(0);
+        yield return null;
+        yield return null;
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(2), "展開後畫在堆疊第一行");
+
+        window.RequestToggleRow(0);
+        DebugWindow.ShowTime = true;
+        yield return null;
+        yield return null;
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(2), "有第二行: 收合也畫");
+
+        window.RequestToggleRow(0);
+        yield return null;
+        yield return null;
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(2), "有第二行又展開: 只畫一個");
+    }
+
+    // ---- 縮小 ----
+
+    [Test]
+    public void Minimized_DefaultOffRoundTripAndResetOnInstall()
+    {
+        Assert.That(DebugWindow.Minimized, Is.False);
+
+        DebugWindow.Minimized = true;
+        Assert.That(DebugWindow.Minimized, Is.True);
+
+        DebugLogs.Install(defaults);
+        Assert.That(DebugWindow.Minimized, Is.False);
+    }
+
+    // 縮小時只畫標題列 (清單與工具列都不畫), 還原後恢復; 繪製不出錯
+    [UnityTest]
+    public IEnumerator Minimized_HidesContentAndRestores()
+    {
+        DebugLogs.isGUILog = true;
+        Log.Information("one");
+        yield return null;
+        yield return null;
+        var window = OpenedWindow();
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(2));
+
+        DebugWindow.Minimized = true;
+        Log.Information("two");
+        yield return null;
+        yield return null;
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(0));
+
+        DebugWindow.Minimized = false;
+        yield return null;
+        yield return null;
+        Assert.That(window.DrawnCopyButtons, Is.EqualTo(3), "還原後包含縮小期間的新訊息");
+    }
+
+    [Test]
+    public void Size_ClampedToMinimum()
+    {
+        var savedSize = DebugWindow.Size;
+
+        DebugWindow.Size = new Vector2(10f, 10f);
+
+        Assert.That(DebugWindow.Size, Is.EqualTo(new Vector2(150f, 60f)));
+        DebugWindow.Size = savedSize;
+    }
+
+    // 預設位置 (右下角) 縮小: 往下縮, 標題列的底邊與原本視窗的底邊相同
+    [Test]
+    public void Minimized_DefaultPosition_KeepsBottomEdge()
+    {
+        DebugWindow.Scale = 1f;
+        float bottom = DebugWindow.Position.y + DebugWindow.CurrentHeight;
+
+        DebugWindow.Minimized = true;
+
+        Assert.That(DebugWindow.CurrentHeight, Is.LessThan(DebugWindow.Size.y));
+        Assert.That(DebugWindow.Position.y + DebugWindow.CurrentHeight, Is.EqualTo(bottom).Within(0.01f));
+        DebugWindow.Scale = 0f;
+    }
+
+    // 視窗在上半部: 往上縮 (左上角不動), 還原後位置不變
+    [Test]
+    public void Minimized_UpperHalf_KeepsTopEdge()
+    {
+        DebugWindow.Scale = 1f;
+        DebugWindow.Position = new Vector2(0f, 0f);
+
+        DebugWindow.Minimized = true;
+        Assert.That(DebugWindow.Position, Is.EqualTo(new Vector2(0f, 0f)));
+
+        DebugWindow.Minimized = false;
+        Assert.That(DebugWindow.Position, Is.EqualTo(new Vector2(0f, 0f)));
+        DebugWindow.Scale = 0f;
+    }
+
+    // 視窗在下半部: 往下縮, 還原時往上展開回原位
+    [Test]
+    public void Minimized_LowerHalf_CollapsesDownAndRestores()
+    {
+        var savedSize = DebugWindow.Size;
+        DebugWindow.Scale = 1f;
+        DebugWindow.Size = new Vector2(300f, 150f);
+        float top = Screen.height - 150f;
+        Assume.That(top, Is.GreaterThan(0f), "畫面太矮");
+        DebugWindow.Position = new Vector2(0f, top);
+
+        DebugWindow.Minimized = true;
+        Assert.That(DebugWindow.Position.y + DebugWindow.CurrentHeight, Is.EqualTo((float)Screen.height).Within(0.01f));
+
+        DebugWindow.Minimized = false;
+        Assert.That(DebugWindow.Position.y, Is.EqualTo(top).Within(0.01f));
+        DebugWindow.Size = savedSize;
+        DebugWindow.Scale = 0f;
+    }
+
+    // 縮小時的邊緣偵測以標題列的高度判斷, 可以貼到畫面底部
+    [Test]
+    public void Minimized_EdgeClampUsesTitleBarHeight()
+    {
+        DebugWindow.Scale = 1f;
+        DebugWindow.Position = new Vector2(0f, 0f);
+        DebugWindow.Minimized = true;
+        DebugWindow.Position = new Vector2(0f, Screen.height + 100f);
+
+        DebugLogs.isGUILog = true;
+
+        Assert.That(DebugWindow.Position.y, Is.EqualTo(Screen.height - DebugWindow.CurrentHeight).Within(0.01f));
+        DebugWindow.Scale = 0f;
+    }
+
+    // 工具列: 寬度不夠時核取方塊移到第二列; 沒有左側按鈕時一律在第一列; 寬度足夠時在第一列
+    [UnityTest]
+    public IEnumerator Toolbar_CheckBoxesFollowWidth()
+    {
+        var savedSize = DebugWindow.Size;
+        DebugWindow.Scale = 1f;
+        DebugWindow.Size = new Vector2(150f, 150f);
+        DebugLogs.isGUILog = true;
+        yield return null;
+        yield return null;
+        Assert.That(OpenedWindow().ChecksOnFirstRow, Is.False, "最小寬度放不下");
+
+        DebugWindow.VisibleButtons = DebugWindowButtons.Time | DebugWindowButtons.Collapse | DebugWindowButtons.Search;
+        yield return null;
+        yield return null;
+        Assert.That(OpenedWindow().ChecksOnFirstRow, Is.True, "沒有左側按鈕");
+
+        if (Screen.width >= 900)
+        {
+            DebugWindow.VisibleButtons = DebugWindowButtons.All;
+            DebugWindow.Size = new Vector2(900f, 150f);
+            yield return null;
+            yield return null;
+            Assert.That(OpenedWindow().ChecksOnFirstRow, Is.True, "寬度足夠");
+        }
+        DebugWindow.Size = savedSize;
+        DebugWindow.Scale = 0f;
     }
 }

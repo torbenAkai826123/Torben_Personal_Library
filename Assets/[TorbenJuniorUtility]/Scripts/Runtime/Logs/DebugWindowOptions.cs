@@ -2,7 +2,8 @@ using UnityEngine;
 
 namespace Torben
 {
-    /// <summary>DebugWindow 上可以隱藏的按鈕. 隱藏的只是按鈕, 功能仍可透過 DebugWindow 的靜態屬性控制.</summary>
+    /// <summary>DebugWindow 上可以隱藏的按鈕. 隱藏的只是按鈕, 功能仍可透過 DebugWindow 的靜態屬性控制.
+    /// 標題列的紅 (Close)、黃 (縮小)、綠 (Auto) 圓點固定顯示, 不在此列舉中.</summary>
     [System.Flags]
     public enum DebugWindowButtons
     {
@@ -10,7 +11,7 @@ namespace Torben
         Levels = 1 << 0,    // N/W/E/D
         Source = 1 << 1,    // Log / Unity
         Clear = 1 << 2,
-        Close = 1 << 3,
+        // 1 << 3 原為 Close; 關閉改由標題列的紅點負責 (固定顯示), 位元保留不重用, 舊設定檔的這個位元會被忽略
         Search = 1 << 4,
         Time = 1 << 5,
         Location = 1 << 6,

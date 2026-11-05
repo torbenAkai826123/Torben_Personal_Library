@@ -149,15 +149,16 @@ namespace Torben
 
             if (defaults == null)
             {
-                Alert(effective.DevelopmentAlert.level, BuildAlertText(FindProblems(effective), releaseProblems, effective.name));
+                var level = effective.DevelopmentAlert.level;
+                Alert(level, BuildAlertText(FindProblems(effective), releaseProblems, effective.name, level));
                 return;
             }
             Object.Destroy(defaults);
             // 不經過 Log: 此時 Log 的設定剛套用, 避免順序問題. 找不到設定檔時讀不到等級, 一律以 Warning 提醒;
-            // 正式版的開發設定 (只可能是 TORBEN_LOG_DEBUG) 併入同一則
+            // 正式版的開發設定 (只可能是 TORBEN_LOG_DEBUG) 以一行併入同一則 (Warning 一律一行)
             string text = $"[Log] LogSettings not found at Resources/{LogSettings.ResourcesPath}; using default values. Create it from Project Settings > TorbenTools > Log.";
             if (releaseProblems != null && releaseProblems.Count > 0)
-                text += ReleaseSection(releaseProblems, "create the settings file and set Development Alert to Off");
+                text += "\n" + ReleaseLine(releaseProblems, "create the settings file and set Development Alert to Off");
             Debug.LogWarning(text);
         }
 
@@ -179,16 +180,31 @@ namespace Torben
             if (isDebugSymbolDefined) problems.Add("TORBEN_LOG_DEBUG (Log.Debug kept in builds)");
         }
 
-        // 合併 A 類 (設定問題) 與 B 類 (正式版的開發設定) 為一則訊息; 兩者都沒有時回傳 null
+        // 合併 A 類 (設定問題) 與 B 類 (正式版的開發設定) 為一則訊息; 兩者都沒有時回傳 null.
+        // B 類在 Warning 時只寫一行 (ReleaseLine); Error 時為多行清單 (ReleaseSection). A 類一律多行.
+        // 只有 B 類且為 Warning 時, 整則訊息就是那一行.
         // 配置: 每次呼叫配置; 只在載入期使用
-        internal static string BuildAlertText(string settingsProblems, List<string> releaseProblems, string fileName)
+        internal static string BuildAlertText(string settingsProblems, List<string> releaseProblems, string fileName, DevelopmentAlertLevel level)
         {
             bool hasRelease = releaseProblems != null && releaseProblems.Count > 0;
             if (settingsProblems == null && !hasRelease) return null;
-            string text = "[Log] LogSettings problems (Development Alert; Project Settings > TorbenTools > Log):" + settingsProblems;
-            if (hasRelease) text += ReleaseSection(releaseProblems, $"set Development Alert to Off in {fileName}");
+            string fix = $"set Development Alert to Off in {fileName}";
+            if (level != DevelopmentAlertLevel.Error)
+            {
+                if (settingsProblems == null) return "[Log] " + ReleaseLine(releaseProblems, fix);
+                string head = SettingsProblemsHeader + settingsProblems;
+                return hasRelease ? head + "\n" + ReleaseLine(releaseProblems, fix) : head;
+            }
+            string text = SettingsProblemsHeader + settingsProblems;
+            if (hasRelease) text += ReleaseSection(releaseProblems, fix);
             return text;
         }
+
+        private const string SettingsProblemsHeader = "[Log] LogSettings problems (Development Alert; Project Settings > TorbenTools > Log):";
+
+        // B 類的一行版本 (Warning): 例如 "Development log settings left on in a non-development build: log.isPrintLog, log.isDebugLog (if intentional, set Development Alert to Off in LogSettings)."
+        private static string ReleaseLine(List<string> releaseProblems, string fix) =>
+            "Development log settings left on in a non-development build: " + string.Join(", ", releaseProblems) + " (if intentional, " + fix + ").";
 
         private static string ReleaseSection(List<string> releaseProblems, string fix)
         {
