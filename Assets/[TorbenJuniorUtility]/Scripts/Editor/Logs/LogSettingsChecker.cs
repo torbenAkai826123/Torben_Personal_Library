@@ -36,8 +36,8 @@ namespace Torben.Editor
     /// </summary>
     public static class LogSettingsChecker
     {
-        /// <summary>容量超過此值時警告 (每筆紀錄都會被視窗複製並組字串, 過大會拖慢繪製).</summary>
-        public const int MaxRecommendedCapacity = 10000;
+        /// <summary>容量超過此值時警告. 數值定義在 DebugWindowOptions.MaxRecommendedCapacity (與執行時的 Development Alert 共用).</summary>
+        public const int MaxRecommendedCapacity = DebugWindowOptions.MaxRecommendedCapacity;
 
         private static readonly (string name, NamedBuildTarget target)[] platforms =
         {
@@ -85,6 +85,15 @@ namespace Torben.Editor
                 }
             }
 
+            // 覆蓋檔遺失 (項目 3 之前的附加檢查): 原本有連結, 但檔案被刪除 (Missing). 建置版會改用預設檔
+            if (IsOverrideMissing(defaultSettings))
+            {
+                var target = defaultSettings;
+                issues.Add(new LogSettingsIssue(LogSettingsIssueLevel.Warning,
+                    $"'{AssetPathOf(defaultSettings)}' projectOverride is Missing (the linked file was deleted). The default file is used at runtime.",
+                    "Clear", () => LogSettingsAssets.ClearOverride(target)));
+            }
+
             // 3. 不支援串接
             var projectOverride = defaultSettings.projectOverride;
             if (projectOverride != null && projectOverride.projectOverride != null)
@@ -102,6 +111,17 @@ namespace Torben.Editor
                 CheckCapacity(issues, effective, "unityCapacity", effective.window.unityCapacity);
             }
             return issues;
+        }
+
+        /// <summary>settings 的 projectOverride 是否為 Missing (有連結但檔案已不存在); 沒有連結時為 false.</summary>
+        /// <remarks>配置: 每次呼叫配置.</remarks>
+        public static bool IsOverrideMissing(LogSettings settings)
+        {
+            using (var serialized = new SerializedObject(settings))
+            {
+                var property = serialized.FindProperty(nameof(LogSettings.projectOverride));
+                return property.objectReferenceValue == null && property.objectReferenceEntityIdValue != EntityId.None;
+            }
         }
 
         /// <summary>結果中是否有警告或錯誤.</summary>

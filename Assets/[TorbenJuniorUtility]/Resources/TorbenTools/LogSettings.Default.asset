@@ -62,3 +62,5 @@ MonoBehaviour:
       color: '#FF6B6B'
     - level: 3
       color: '#9E9E9E'
+  developmentAlert:
+    level: 1

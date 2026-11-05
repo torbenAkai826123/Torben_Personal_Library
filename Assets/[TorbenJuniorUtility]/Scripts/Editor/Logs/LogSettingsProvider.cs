@@ -6,7 +6,8 @@ using UnityEngine;
 namespace Torben.Editor
 {
     // Project Settings > TorbenTools > Log
-    // 每類一個 Header 區塊; 同一列中開關在左、按鈕在右. 設定內容只以表格顯示, 編輯在設定檔的 Inspector 進行
+    // 每類一個 Header 區塊; 同一列中開關在左、按鈕在右. 設定內容只以表格顯示, 編輯在設定檔的 Inspector 進行;
+    // 例外: Development Alert 只在此頁編輯 (Inspector 不顯示)
     internal sealed class LogSettingsProvider : SettingsProvider
     {
         public const string SettingsPath = "Project/TorbenTools/Log";
@@ -23,6 +24,7 @@ namespace Torben.Editor
         private LogSettings defaultSettings;
         private Vector2 scroll;
         private GUIStyle rowStyle;
+        private SerializedObject alertObject;   // Development Alert 的編輯對象 (生效中的檔案)
 
         private LogSettingsProvider() : base(SettingsPath, SettingsScope.Project) { }
 
@@ -77,6 +79,7 @@ namespace Torben.Editor
 
             var effective = defaultSettings.ResolveEffective();
             DrawFiles(effective);
+            DrawDevelopmentAlert(effective);
             DrawBuild();
             DrawTables(effective);
             EditorGUILayout.EndScrollView();
@@ -139,6 +142,23 @@ namespace Torben.Editor
                     EditorGUIUtility.PingObject(effective);
                 }
             }
+        }
+
+        // Development Alert: 編輯生效中的檔案 (有覆蓋檔時為覆蓋檔), 以 SerializedObject 寫入, 支援 Undo
+        private void DrawDevelopmentAlert(LogSettings effective)
+        {
+            Header("Runtime Check");
+            if (alertObject == null || alertObject.targetObject != effective)
+            {
+                alertObject?.Dispose();
+                alertObject = LogSettingsAssets.CreateDevelopmentAlertObject(defaultSettings);
+            }
+            alertObject.Update();
+            var level = alertObject.FindProperty(LogSettingsAssets.DevelopmentAlertLevelPath);
+            if (level == null) return;
+            EditorGUILayout.PropertyField(level, new GUIContent("Development Alert",
+                "When the settings have problems at startup (DebugLogs.Install), report them once with Debug.LogWarning (Warning) or Debug.LogError (Error)."));
+            alertObject.ApplyModifiedProperties();
         }
 
         // 建置: 開關在左; 各平台與 Build Profile 的狀態以表格顯示

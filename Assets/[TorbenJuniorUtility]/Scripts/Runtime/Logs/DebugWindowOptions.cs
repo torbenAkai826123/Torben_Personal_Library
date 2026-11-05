@@ -15,6 +15,7 @@ namespace Torben
         Time = 1 << 5,
         Location = 1 << 6,
         Collapse = 1 << 7,
+        Copy = 1 << 8,      // 每一列的複製按鈕與工具列的 Copy
         All = ~0,
     }
 
@@ -50,6 +51,11 @@ namespace Torben
     [System.Serializable]
     public sealed class DebugWindowOptions
     {
+        /// <summary>
+        /// 容量的建議上限: 超過時 Editor 狀態檢查與 Development Alert 會提醒 (每筆紀錄都會被視窗複製並組字串, 過大會拖慢繪製).
+        /// </summary>
+        public const int MaxRecommendedCapacity = 10000;
+
         // Inspector 依宣告順序顯示: bool 在上, 其他欄位在下 (序列化以欄位名稱對應, 調整順序不影響既有資料)
         /// <summary>對應 DebugWindow.IsDraggable.</summary>
         public bool isDraggable = true;

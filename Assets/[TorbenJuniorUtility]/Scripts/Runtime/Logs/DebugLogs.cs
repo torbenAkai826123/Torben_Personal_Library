@@ -109,10 +109,12 @@ namespace Torben
 
         // 重設狀態, 加入 Console 與畫面視窗的歷史紀錄兩個 sink, 套用設定檔, 並開始收集 Unity 引擎訊息.
         // settings 為預設檔 (有 projectOverride 時改用它); null 時以欄位初始值運作並警告一次.
+        // 最後依 Development Alert 的等級提醒設定問題 (此時已開始收集 Unity 訊息, 畫面視窗收得到)
         internal static void Install(LogSettings settings)
         {
             guiLog = false;
             Log.ClearSinks();   // 關閉 Domain Reload 時靜態狀態會保留, 先清掉避免重複加入
+            Log.SinkErrorHandler = ReportSinkError;
 
             LogSettings effective = settings != null ? settings.ResolveEffective() : null;
             LogSettings defaults = null;
@@ -126,10 +128,81 @@ namespace Torben
             Application.quitting -= OnQuitting;
             Application.quitting += OnQuitting;
 
-            if (defaults == null) return;
+            if (defaults == null)
+            {
+                Alert(effective.DevelopmentAlert.level, FindProblems(effective));
+                return;
+            }
             Object.Destroy(defaults);
-            // 不經過 Log: 此時 Log 的設定剛套用, 避免順序問題
+            // 不經過 Log: 此時 Log 的設定剛套用, 避免順序問題. 找不到設定檔時讀不到等級, 一律以 Warning 提醒
             Debug.LogWarning($"[Log] LogSettings not found at Resources/{LogSettings.ResourcesPath}; using default values. Create it from Project Settings > TorbenTools > Log.");
+        }
+
+        // sink 的 Write 拋例外時 (每個 sink 只有第一次) 由 Log 呼叫; 不經過 Log.
+        // 包成一個例外輸出, 讓訊息第一行帶有 sink 型別名稱且只佔一則.
+        // 不用 InnerException: Unity 會改以最內層例外的訊息顯示, sink 名稱就看不到; 原例外 (含堆疊) 放在訊息後面
+        private static void ReportSinkError(ILogSink sink, System.Exception exception)
+        {
+            Debug.LogException(new System.Exception(
+                $"[Log] Sink '{sink.GetType().FullName}' threw an exception while writing (later failures of this sink are not reported).\n{exception}"));
+        }
+
+        // 依等級輸出一則提醒; 不經過 Log. problems 為 null 時不輸出
+        private static void Alert(DevelopmentAlertLevel level, string problems)
+        {
+            if (problems == null || level == DevelopmentAlertLevel.Off) return;
+            string text = "[Log] LogSettings problems (Development Alert; Project Settings > TorbenTools > Log):" + problems;
+            if (level == DevelopmentAlertLevel.Error) Debug.LogError(text);
+            else Debug.LogWarning(text);
+        }
+
+        // 啟動時檢查設定檔: 容量超出範圍、等級陣列重複. 每個問題一行 (以換行開頭), 沒有問題時回傳 null
+        // 配置: 每次呼叫配置; 只在載入期使用
+        internal static string FindProblems(LogSettings settings)
+        {
+            System.Text.StringBuilder text = null;
+            var window = settings.window;
+            if (window != null)
+            {
+                CheckCapacity(ref text, "window.logCapacity", window.logCapacity);
+                CheckCapacity(ref text, "window.unityCapacity", window.unityCapacity);
+                var levels = new LogLevel[window.levelColors?.Length ?? 0];
+                for (int i = 0; i < levels.Length; i++) levels[i] = window.levelColors[i].level;
+                CheckDuplicates(ref text, "window.levelColors", levels);
+            }
+            if (settings.log?.stackTrace != null)
+            {
+                var switches = settings.log.stackTrace;
+                var levels = new LogLevel[switches.Length];
+                for (int i = 0; i < levels.Length; i++) levels[i] = switches[i].level;
+                CheckDuplicates(ref text, "log.stackTrace", levels);
+            }
+            return text?.ToString();
+        }
+
+        private static void CheckCapacity(ref System.Text.StringBuilder text, string field, int capacity)
+        {
+            if (capacity < 1)
+                Append(ref text, $"{field} is {capacity}; it must be at least 1 (1 is used).");
+            else if (capacity > DebugWindowOptions.MaxRecommendedCapacity)
+                Append(ref text, $"{field} is {capacity}; values above {DebugWindowOptions.MaxRecommendedCapacity} may slow down the window.");
+        }
+
+        // 同一等級出現多次時, 只有最上面那筆生效
+        private static void CheckDuplicates(ref System.Text.StringBuilder text, string field, LogLevel[] levels)
+        {
+            for (int i = 0; i < levels.Length; i++)
+            {
+                if (System.Array.IndexOf(levels, levels[i]) != i) continue;     // 只在第一次出現時檢查
+                if (System.Array.IndexOf(levels, levels[i], i + 1) < 0) continue;
+                Append(ref text, $"{field} lists {levels[i]} more than once; only the first entry is used.");
+            }
+        }
+
+        private static void Append(ref System.Text.StringBuilder text, string line)
+        {
+            if (text == null) text = new System.Text.StringBuilder();
+            text.Append("\n- ").Append(line);
         }
     }
 

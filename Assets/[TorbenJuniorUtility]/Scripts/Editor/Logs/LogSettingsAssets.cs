@@ -130,6 +130,17 @@ namespace Torben.Editor
             return true;
         }
 
+        /// <summary>Development Alert 等級在 LogSettings 中的序列化路徑 (欄位為 private, 以 SerializedObject 編輯).</summary>
+        public const string DevelopmentAlertLevelPath = "developmentAlert.level";
+
+        /// <summary>
+        /// Project Settings 頁面編輯 Development Alert 用的 SerializedObject: 對象為 defaultSettings 生效中的檔案
+        /// (有覆蓋檔時為覆蓋檔), 與 Save Current State 的規則相同. 以 ApplyModifiedProperties 寫入時支援 Undo.
+        /// </summary>
+        /// <remarks>配置: 每次呼叫配置.</remarks>
+        public static SerializedObject CreateDevelopmentAlertObject(LogSettings defaultSettings)
+            => new SerializedObject(defaultSettings.ResolveEffective());
+
         /// <summary>目前建置平台.</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static NamedBuildTarget ActiveBuildTarget

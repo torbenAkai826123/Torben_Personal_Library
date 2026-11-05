@@ -18,6 +18,14 @@ namespace Torben
         public DebugLogsOptions output = new DebugLogsOptions();
         public DebugWindowOptions window = new DebugWindowOptions();
 
+        // 只在 Project Settings 頁面編輯 (以 SerializedObject 找欄位名稱 "developmentAlert"); Inspector 不顯示
+        [UnityEngine.SerializeField, UnityEngine.HideInInspector]
+        private DevelopmentAlertOptions developmentAlert = new DevelopmentAlertOptions();
+
+        /// <summary>啟動時設定檢查的提醒設定 (見 DevelopmentAlertOptions). 舊資料沒有此欄位時為欄位初始值.</summary>
+        /// <remarks>配置: 零配置 (欄位為 null 時第一次讀取配置).</remarks>
+        public DevelopmentAlertOptions DevelopmentAlert => developmentAlert ??= new DevelopmentAlertOptions();
+
         /// <summary>
         /// 套用三組設定 (Log、DebugWindow、DebugLogs 依序); DebugWindow 的容量不在此套用.
         /// 欄位為 null 時 (例如舊資料) 略過該組.

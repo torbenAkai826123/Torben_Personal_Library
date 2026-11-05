@@ -1,7 +1,8 @@
 # Log 系統現況報告 (給設計用 AI)
 
 - 對象: 負責後續設計 Log 系統的 AI。假設讀者看不到原始碼, 本文已附上必要的型別定義。
-- 基準: 提交 `5207f04` (2026-11-03), 分支 `main`。含 2026-11-02 的問題修正 (第 7 節)、Unity 引擎訊息收集, 2026-11-03 的時間 / 呼叫端位置 / 堆疊追蹤與視窗顯示 (第 7.1 節), 以及同日的寫入方法精簡 (第 7.2 節) 與設定檔 / Editor 工具 (第 7.3 節, 提交 `23a6a4a`)。
+- 基準: 提交 `7596ee1` (2026-11-03), 分支 `main`。含 2026-11-02 的問題修正 (第 7 節)、Unity 引擎訊息收集, 2026-11-03 的時間 / 呼叫端位置 / 堆疊追蹤與視窗顯示 (第 7.1 節), 以及同日的寫入方法精簡 (第 7.2 節)、設定檔 / Editor 工具 (第 7.3 節, 提交 `23a6a4a`)、視窗行號 / 自動捲動 / 來源按鈕調整 (第 7.4 節) 與堆疊文字清理 (第 7.5 節, 提交 `7596ee1`); 另含 2026-11-05 的 v1 收尾 (第 7.6 節: Development Alert、sink 例外隔離、複製功能)。
+- 版本: **Log 系統桌面版 v1 完成** (2026-11-05, 第 7.6 節)。之後只剩 Android 實機驗證 (第 8.1 節) 與讀寫系統完成後的寫檔 sink。
 - 權威說明: [`docs/log-system.md`](log-system.md) (行為與 API); 本報告補上資料結構全貌、限制、缺口與已知問題。兩者衝突時以原始碼為準。
 
 ---
@@ -35,6 +36,7 @@
 | Debug 等級編譯期移除 | 完成 | Core `Log.Debug` 的 `[Conditional]` |
 | 總開關、Debug 等級開關 | 完成 | Core `Log.isPrintLog` / `isDebugLog` |
 | 多 sink (copy-on-write) | 完成 | Core `Log.AddSink` 等 |
+| sink 例外隔離 (例外不傳回呼叫端, 每個 sink 只回報一次) | 完成 | Core `Log.SinkErrorHandler`; Runtime `DebugLogs.Install` 設定為 `Debug.LogException` |
 | 分類標籤 + 標籤顏色 | 完成 | Core `LogCategory` |
 | 歷史紀錄 (環狀緩衝區, 含 Clear) | 完成 | Core `LogHistorySink` |
 | 時間戳記 (UTC) | 完成 | Core `LogEntry.Time` |
@@ -42,6 +44,7 @@
 | 堆疊追蹤 (依等級開關, 預設 Error) | 完成 | Core `LogStackTrace`、`Log.SetStackTraceEnabled` |
 | Unity Console 輸出 | 完成 | Runtime `DebugLogs` |
 | 啟動時自動安裝 sink | 完成 | Runtime `DebugLogs.Install` |
+| Development Alert (啟動時設定問題以 Unity Log 提醒, Off / Warning / Error) | 完成 | Runtime `DevelopmentAlertOptions`、`DebugLogs.Install`; Editor Project Settings 頁面 |
 | 設定檔 (預設檔 + 遊戲專案覆蓋檔, 啟動時套用一次) | 完成 | Core `LogOptions`; Runtime `LogSettings`、`DebugLogsOptions`、`DebugWindowOptions` |
 | 歷史紀錄容量可設定 (Log / Unity 各自) | 完成 (只在啟動時生效) | `DebugWindowOptions.logCapacity` / `unityCapacity` |
 | 畫面視窗 (IMGUI) | 完成 | Runtime `DebugWindow` |
@@ -54,9 +57,10 @@
 | ├ 依畫面高度自動縮放 | 完成 (行動平台未驗證) | |
 | ├ Clear (兩段式確認)、Close 按鈕 | 完成 | |
 | ├ 自動捲到最下方 | 完成 | |
+| ├ 複製 (單筆 / 目前看得到的全部, 純文字) | 完成 (Editor、macOS IL2CPP 建置人工確認) | Core `LogText.FormatForCopy`; Runtime `GUIUtility.systemCopyBuffer` |
 | └ 隱藏個別按鈕 | 完成 | `DebugWindow.VisibleButtons` |
 | Unity 引擎訊息收集 (獨立開關 `isUnityLog`, 預設開) | 完成 | Runtime `DebugLogs`、`UnityLogCategory` |
-| ├ 視窗 Log / Unity 來源篩選 | 完成 | `DebugWindow.ShowLogMessages` / `ShowUnityMessages` |
+| ├ 視窗 Log / Unity 來源篩選 (單一輪替按鈕) | 完成 | `DebugWindow.ShowLogMessages` / `ShowUnityMessages` |
 | └ Clear 只清 Log, 保留 Unity 訊息 | 完成 | |
 | 跨場景宿主 | 完成 | Runtime `CrossObject` |
 | Console 點兩下跳到呼叫端 | **未解決** (`HideInCallstack` 不適用, 見 7.1) | — |
@@ -123,7 +127,8 @@ public enum LogLevel { Normal, Warning, Error, Debug }
 public interface ILogSink { void Write(in LogEntry entry); }
 ```
 
-- 同步呼叫, 在呼叫 `Log.Xxx` 的執行緒上執行。沒有非同步佇列、沒有例外隔離 (某個 sink 丟例外會中斷後續 sink 並傳回呼叫端)。
+- 同步呼叫, 在呼叫 `Log.Xxx` 的執行緒上執行。沒有非同步佇列。
+- 例外隔離 (7.6): 每個 sink 的 `Write` 各自以 `try / catch` 包住。某個 sink 拋例外時, 後面的 sink 照常收到該筆訊息, 例外不傳回呼叫端; 例外交給 `Log.SinkErrorHandler`, 每個 sink 實例只回報第一次 (`RemoveSink` / `ClearSinks` 清除記錄)。失敗的 sink 不會被自動移除。回報期間以 `[ThreadStatic]` 旗標略過同一執行緒上的 `Log` 寫入 (防遞迴), 處理器自己拋的例外被忽略。無例外時的寫入路徑沒有新增配置。
 
 ### 4.3 `LogEntry`
 
@@ -231,7 +236,8 @@ public static class Log
     public static bool IsEnabled(LogLevel level);  // isPrintLog && 有 sink && (非 Debug 或 isDebugLog)
     public static void AddSink(ILogSink sink);     // 重複或 null 不做事; 配置新陣列
     public static void RemoveSink(ILogSink sink);  // 有移除時配置新陣列
-    public static void ClearSinks();
+    public static void ClearSinks();                // 一併清除 sink 錯誤的回報記錄
+    public static System.Action<ILogSink, System.Exception> SinkErrorHandler;  // sink 例外的回報; null 時不回報 (見 4.2)
     public static bool IsStackTraceEnabled(LogLevel level);              // 預設只有 Error
     public static void SetStackTraceEnabled(LogLevel level, bool isEnabled); // 隨時可改, 只影響之後的訊息
 
@@ -280,7 +286,7 @@ Unity 訊息的等級對應: `Warning` → Warning; `Error` / `Assert` / `Except
 
 Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下仍跳到 `DebugLogs.Write`。`Application.quitting` 時取消訂閱。
 
-安裝 (`[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]`): `Resources.Load<LogSettings>(LogSettings.ResourcesPath)` 讀取預設檔 (有 `projectOverride` 時改用覆蓋檔, 找不到時用 `CreateInstance` 的欄位初始值並以 `UnityEngine.Debug.LogWarning` 警告一次), 重設 `isGUILog`、`Log.ClearSinks()`、加入 `new DebugLogs()` 與 `DebugWindow.ResetStatics(logCapacity, unityCapacity)` 回傳的歷史紀錄, 再依序套用 `log`、`window`、`output`。此階段讀得到 Resources (2026-11-03 Editor 實測), 安裝維持在 `SubsystemRegistration`。測試用的 `internal Install(LogSettings)` 以 `InternalsVisibleTo` 開放給 `Library.Tests.PlayMode`。進入 Play 都會重設 (含關閉 Domain Reload)。**注意**: 會清掉使用者在更早階段加入的自訂 sink, 自訂 sink 必須在 `BeforeSceneLoad` 之後加入。
+安裝 (`[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]`): `Resources.Load<LogSettings>(LogSettings.ResourcesPath)` 讀取預設檔 (有 `projectOverride` 時改用覆蓋檔, 找不到時用 `CreateInstance` 的欄位初始值並以 `UnityEngine.Debug.LogWarning` 警告一次), 重設 `isGUILog`、`Log.ClearSinks()`、加入 `new DebugLogs()` 與 `DebugWindow.ResetStatics(logCapacity, unityCapacity)` 回傳的歷史紀錄, 再依序套用 `log`、`window`、`output`, 最後依 `LogSettings.DevelopmentAlert` 的等級提醒設定問題 (容量小於 1 或大於 `DebugWindowOptions.MaxRecommendedCapacity`、`log.stackTrace` / `window.levelColors` 等級重複; 合併成一則, 不經過 `Log`; 此時已開始收集 Unity 訊息)。`Install` 也把 `Log.SinkErrorHandler` 設為以 `Debug.LogException` 輸出 (訊息第一行帶 sink 型別全名)。此階段讀得到 Resources (2026-11-03 Editor 實測), 安裝維持在 `SubsystemRegistration`。測試用的 `internal Install(LogSettings)` 以 `InternalsVisibleTo` 開放給 `Library.Tests.PlayMode`。進入 Play 都會重設 (含關閉 Domain Reload)。**注意**: 會清掉使用者在更早階段加入的自訂 sink, 自訂 sink 必須在 `BeforeSceneLoad` 之後加入。
 
 ### 5.2 `DebugWindow` (畫面視窗, `MonoBehaviour`)
 
@@ -288,13 +294,17 @@ Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下
 - 常數: `WindowId 0x4C4F47`、邊距 `10`、標題列高 `18`、參考高度 `720`。
 - 靜態設定 (視窗建立前就能設定, 進入 Play 時以 `DebugWindowOptions` 欄位初始值重設後套用設定檔): `VisibleButtons`、`UsesDefaultPosition`、`History`、`Size` (預設 600×180, 最小 80×60)、`Position` / `ResetPosition()`、`IsDraggable`、`AutoScroll`、`Scale` (0 = `max(1, Screen.height / 720)`)、`SearchText`、`IsLevelVisible` / `SetLevelVisible`、`GetLevelColor` / `SetLevelColor` (預設 Warning `#FFD54F`、Error `#FF6B6B`、Debug `#9E9E9E`)、`ShowTime` / `ShowLocation` / `Collapse` (預設皆 `false`)。
 - 內部快取: 每份紀錄一個 `Source` (`Snapshot`、`Sequences`、`Lines` 長度為該紀錄的容量), `visible[logCapacity + unityCapacity]` (篩選後索引, Unity 的索引加 `logCapacity` 區分)。陣列在元件建立或歷史紀錄換新時配置 (`BindHistories`), 不在每幀配置。以 `Version` / `filterVersion` / `styleVersion` 三個版本號決定是否重組字串或重算篩選; 只在 `EventType.Layout` 更新資料。
-- 介面: 上方一列 N/W/E/D 開關 + Log/Unity 開關 + `Clear` + `X`; 第二列搜尋框 + `Time` / `Loc` / `Collapse` / `Auto` 方形核取方塊 (`CheckBox`: 執行期產生 14×14 方框貼圖, 開啟時打勾, 元件銷毀時釋放); 捲動清單。
+- 介面: 上方一列 N/W/E/D 開關 + 來源按鈕 + `Copy` + `Clear` + `X`; 第二列搜尋框 + `Time` / `Loc` / `Collapse` / `Auto` 方形核取方塊 (`CheckBox`: 執行期產生 14×14 方框貼圖, 開啟時打勾, 元件銷毀時釋放); 捲動清單。
+- 來源按鈕 (`DrawSourceButton`): 單一按鈕依 `ShowLogMessages` / `ShowUnityMessages` 顯示 `Both` / `Unity` (只顯示 Unity) / `Unity Off` (只顯示 Log) / `None`, 點擊輪替 Both → Unity → Unity Off → Both; `None` (兩者都關, 只能由程式設定) 點擊回到 Both。
+- `Auto` (`AutoScroll`): 有新列時捲到最下方; 由關轉開時在下一個 `Layout` 立即捲到最下方 (`seenAutoScroll` 記錄上次的值)。
 - 每一列 (`DrawRow`):
-  - 第一行: 行號 `[n]` (不合併時在清單中的順序, 套用篩選後) + `+` / `-` 展開按鈕 (沒有堆疊追蹤時 `GUI.enabled = false`) + 訊息 + 合併次數膠囊 (次數 > 1 才顯示, 最右側)。行號、按鈕、膠囊以訊息第一行文字中線置中 (`lineStyle.padding.top + lineHeight / 2`)。
+  - 第一行: 行號 `[n]` (該筆的流水號, `LogHistorySink` 兩份紀錄共用, 依寫入順序遞增; 同一筆號碼固定, 不因舊紀錄被擠掉或篩選而改變, 被篩掉或屬於另一份紀錄的號碼留空缺; 欄寬依目前最大號碼的位數決定, 最少 3 位) + `+` / `-` 展開按鈕 (沒有堆疊追蹤時 `GUI.enabled = false`) + 訊息 + 合併次數膠囊 (次數 > 1 才顯示, 最右側)。行號、按鈕、膠囊以訊息第一行文字中線置中 (`lineStyle.padding.top + lineHeight / 2`)。
   - 第二行 (`Time` 或 `Loc` 開啟時, 與訊息間多 2px, 字比主訊息小 2 點): `(HH:mm:ss.ff)` + `路徑:行號`。Log 訊息用呼叫端位置; Unity 訊息用 `LogText.TryParseUnityLocation`。Editor 中位置是按鈕, 以 `AssetDatabase.OpenAsset(asset, line)` 開啟, 找不到資源時改用 `InternalEditorUtility.OpenFileAtLineExternal`; 建置版只顯示。專案根 (`Application.dataPath` 的上一層) 只在 Editor 取得。
+  - 展開按鈕右側為複製按鈕 `C` (尺寸同展開按鈕, `DebugWindowButtons.Copy` 關閉時不畫, 第二行與展開內容的縮排跟著調整)。
   - 展開時: 小一級字顯示 `StackTrace.Text`。
   - 列與列之間 1px 分隔線 (白色, 透明度 0.12), 兼作對齊參考線。
-- 合併 (`Collapse`): 以 `GroupKey` (等級、分類實例、訊息、呼叫端檔案與行號) 分組, 用重用的 `Dictionary<GroupKey, int>` 與 `previousOccurrence[]` 串起同組。顯示在第一次出現的位置並沿用其行號 (同 Unity Console); 合併多次的列不顯示時間; 展開顯示第一次出現的堆疊。只合併仍在紀錄中的訊息, 被擠掉的不計入次數。
+- 合併 (`Collapse`): 以 `GroupKey` (等級、分類實例、訊息、呼叫端檔案與行號) 分組, 用重用的 `Dictionary<GroupKey, int>` 與 `previousOccurrence[]` 串起同組。顯示在第一次出現的位置並沿用其流水號 (同 Unity Console); 合併多次的列不顯示時間; 展開顯示第一次出現的堆疊。只合併仍在紀錄中的訊息, 被擠掉的不計入次數。
+- 複製 (7.6): 單筆複製該列 (合併時為第一次出現的那筆並附次數), 工具列 `Copy` 依顯示順序複製篩選後的每一列, 每筆之間空一行; 文字由 `LogText.FormatForCopy` 組成, 寫入 `GUIUtility.systemCopyBuffer`。按下後約 1 秒 (`Time.realtimeSinceStartup`) 顯示已複製狀態 (綠底, 工具列文字 `Copied`), 狀態在 `Layout` 決定。只在按下時配置。
 - 展開狀態以流水號存在 `HashSet<long>`; 合併時同組任一次被展開就算展開。按鈕點擊與 Time / Loc 變更都延到下一個 `Layout` 事件套用。
 - 時間、位置、行號、次數字串第一次顯示時才組並快取 (`Source.Times` / `Locations` 隨快照一起搬移)。膠囊貼圖 (16×16, `HideAndDontSave`) 在建立樣式時產生一次, `OnDestroy` 釋放。
 - 外觀常數: `FoldWidth 18`、`FoldHeight 14`、`BadgeHeight 16`、`DetailOffset 2`、`separatorColor`; 詳見 `docs/log-system.md`「可調整的外觀參數」。
@@ -316,8 +326,9 @@ Console 輸出 (`Write`) 未改變: 只輸出 `tag + message`, Console 點兩下
 | dotnet `LogTests` + `LogHistorySinkTests` + `LogEntryInfoTests` | 61 (58 → 61, 7.2 新增 3 個) | **通過** (2026-11-03 `dotnet test dotnet/Library.Tests/Library.Tests.csproj`, 整體 111/111) |
 | dotnet `LogStackTraceCleanTests` | 25 | **通過** (2026-11-03 `dotnet test dotnet/TorbenJunior.sln`, Library.Tests 141/141、Samples.Tests 8/8) |
 | dotnet `LogOptionsTests` | 5 | **通過** (2026-11-03 `dotnet test dotnet/TorbenJunior.sln`, Library.Tests 116/116、Samples.Tests 8/8) |
-| PlayMode `DebugWindowTests` + `LogSettingsInstallTests` | 22 + 8 | **通過** (2026-11-03 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 37/37) |
-| EditMode `ScriptingDefineUtilityTests` + `LogSettingsCheckerTests` + `LogLevelColorDrawerTests` | 38 | **通過** (2026-11-03 `unity command test run --mode editor`, 全部 EditMode 46/46) |
+| dotnet `LogSinkIsolationTests` + `LogTextCopyTests` | 9 + 40 (7.6 新增) | **通過** (2026-11-05 `dotnet test dotnet/TorbenJunior.sln`, Library.Tests 190/190 (141 → 190)、Samples.Tests 8/8) |
+| PlayMode `DebugWindowTests` + `LogSettingsInstallTests` | 26 + 18 (7.6 新增 4 + 10) | **通過** (2026-11-05 `unity command test run --mode playmode --async_tests true`, 全部 PlayMode 51/51 (37 → 51)) |
+| EditMode `ScriptingDefineUtilityTests` + `LogSettingsCheckerTests` + `LogLevelColorDrawerTests` | 45 (7.6 新增 7) | **通過** (2026-11-05 `unity command test run --mode editor`, 全部 EditMode 53/53 (46 → 53)) |
 
 dotnet `LogTests` 另含 `Format` 4 個等級 / 有無分類 / 關閉時不格式化、`Log.Debug` 的 3 個 `ConditionalAttribute`、公開寫入方法只有 10 個 (反射, 只在測試中使用)。測試專案在 `DefineConstants` 加入 `TORBEN_LOG_DEBUG`, 否則測試中的 `Log.Debug` 會被移除。
 
@@ -327,7 +338,7 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 
 人工確認 (使用者於 Play 中, 2026-11-02 ~ 11-03): Log / Unity 開關與合併順序、Clear 保留 Unity 訊息、第二行字體大小、Editor 點擊位置開到正確行、展開按鈕、合併次數、行號、膠囊位置、置中對齊、分隔線 — 皆確認可接受。
 
-仍未測試: 拖曳手感、搜尋操作、Clear 兩段式按鈕的自動化測試; 背景執行緒產生的 Unity 訊息。
+仍未測試: 拖曳手感、搜尋操作、Clear 兩段式按鈕與來源輪替按鈕點擊的自動化測試; 背景執行緒產生的 Unity 訊息。上方人工確認早於來源按鈕改為輪替 (7.4), 輪替按鈕的人工確認未記錄。
 
 ---
 
@@ -383,6 +394,39 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 | 測試隔離 | `DebugWindowTests` 與 `LogSettingsInstallTests` 在 SetUp 以 `CreateInstance<LogSettings>()` 重新安裝, TearDown 恢復啟動時的設定檔; 專案的覆蓋檔 (例如開啟 `openWindowOnStart`) 不影響測試結果 |
 | Build Profile | `BuildProfile.GetActiveBuildProfile().scriptingDefines` 可讀到目前 profile 的 define (編譯通過; 有啟用 profile 時的顯示未人工確認)。Keep Debug Log in Builds 只改 Player Settings, 不管理 profile 的 define |
 
+### 7.4 2026-11-03 視窗調整 (提交 `4896866`、`8b0927d`)
+
+| 項目 | 處理 |
+|---|---|
+| 行號 | 由「篩選後清單中的順序」改為該筆的流水號 (見 5.2); 篩選或舊紀錄被擠掉時號碼不變 |
+| `Auto` 開關 | 第二列新增 `Auto` 核取方塊, 同步 `DebugWindow.AutoScroll`; 由關轉開時立即捲到最下方 |
+| 來源篩選 | Log / Unity 兩個開關改為單一輪替按鈕 (見 5.2); `ShowLogMessages` / `ShowUnityMessages` API 不變 |
+| 測試 | `4896866` 新增 PlayMode 測試; `8b0927d` 未新增測試 (按鈕點擊沒有自動化測試) |
+
+### 7.5 2026-11-03 堆疊文字清理 (提交 `7596ee1`)
+
+| 項目 | 處理 |
+|---|---|
+| 目的 | IL2CPP / Mono 堆疊文字去掉畫面上沒用的 IL / 原生偏移與 MVID 佔位, 路徑縮短成與視窗第二行相同格式 |
+| 實作 | `LogStackTrace.CleanFrames` (internal) 逐行清理, `Text` 與 `FromText` 都套用; 不用 `System.Text.RegularExpressions` (IL2CPP 會增加程式碼大小)。規則見 4.3.1 與 `docs/log-system.md`「堆疊文字清理」 |
+| 平台 | IL2CPP 開啟 File Name and Line Number 時的行號已在 macOS IL2CPP 建置確認; Mono 建置版未驗證 |
+| 測試 | 新增 dotnet `LogStackTraceCleanTests` 25 個; `Torben.Core.csproj` 加 `InternalsVisibleTo Library.Tests` (只影響 dotnet 建置, Unity 不讀此檔) |
+
+### 7.6 2026-11-05 Log v1 收尾
+
+| 項目 | 處理 |
+|---|---|
+| Development Alert | `LogSettings` 新增 `[SerializeField, HideInInspector] developmentAlert` (`DevelopmentAlertOptions.level`, 預設 `Warning`), 以 `DevelopmentAlert` 屬性讀取; 只在 Project Settings 頁面 (Runtime Check 區塊) 以 `SerializedObject` 編輯生效中的檔案, Inspector 不顯示, Save Current State 不寫入。`Install` 最後檢查容量與等級陣列重複, 合併成一則以 `Debug.LogWarning` / `LogError` 輸出 |
+| 提醒時機 | 現有順序已正確: `isUnityLog = true` (訂閱) → `Apply` → 提醒, 提醒在開始收集 Unity 訊息之後, 未調整。設定檔的 `isUnityLog` 為關閉時 `Apply` 會取消訂閱, 該則提醒只出現在 Console |
+| 容量上限常數 | 移到 `DebugWindowOptions.MaxRecommendedCapacity` (Runtime), `LogSettingsChecker.MaxRecommendedCapacity` 引用它。條件與 Editor 相同: 大於 10000 才提醒 (等於 10000 不提醒) |
+| 容量小於 1 | 維持現況: `DebugWindow.ResetStatics` 以 `Mathf.Max(1, ...)` 修正為 1, 不拋例外 (`LogHistorySink` 建構子本身仍會對小於 1 拋例外, 但 Install 不會傳入) |
+| 覆蓋檔 Missing (選做 1.4) | 已實作: `LogSettingsChecker.IsOverrideMissing` (`objectReferenceValue == null && objectReferenceEntityIdValue != EntityId.None`; Unity 6.5 的 `objectReferenceInstanceIDValue` 已過時) |
+| sink 例外隔離 | 見 4.2。Runtime 的回報不包 `InnerException` (Unity 會以最內層例外的訊息顯示, sink 名稱會消失), 改把原例外文字接在訊息後面 |
+| 複製 | 見 5.2。`DebugWindowButtons.Copy = 1 << 8`; 專案的預設檔 `visibleButtons` 為 `-1` (`All`), 不受影響 |
+| 文字格式 | Core `LogText.FormatForCopy` / `StripRichText` / `TryGetLocation` (視窗的位置字串也改用 `TryGetLocation`, 結果不變) |
+| 測試 | dotnet +49、EditMode +7、PlayMode +14 (見第 6 節) |
+| 人工確認 (使用者, 2026-11-05) | Editor: Project Settings 切換三種等級、刪除設定檔後 GUI 視窗看得到提醒、單筆與全部複製貼上內容正確。macOS IL2CPP 建置: 複製可用; 設定有問題且等級為 Error 時開發主控台顯示提醒 (只設等級、設定沒問題時不輸出, 為預期行為) |
+
 ## 8. 目前沒有的能力 (設計時可考慮的缺口)
 
 以下只列出現況缺少的部分, 不代表都需要做:
@@ -390,15 +434,30 @@ PlayMode 涵蓋: 安裝歷史紀錄、建立 / 隱藏視窗、`isGUILog` 抑制 
 - **編譯期移除**: 只有 `Log.Debug` 有 `[Conditional]` (7.2); `Information` / `Warning` / `Error` / `Format` 在正式建置仍保留 (關閉時不輸出)。
 - **Entry 資訊**: 時間、呼叫端位置、堆疊追蹤已完成 (7.1)。仍沒有影格編號、遊戲時間 (需由 Runtime 注入)、執行緒 ID、context 物件。
 - **Console 點兩下**: 仍跳到 `DebugLogs.Write`, 不是呼叫端。可能做法 (未實作、未驗證): Console 訊息加 `<a href="..." line="...">` 超連結; 或 Editor 以 `[OnOpenAsset]` 攔截後依呼叫端轉址 (需讀 Console 內部狀態, 較脆弱)。
-- **視窗互動**: 沒有點擊整列反白 / 選取 (已評估: 需記錄選取狀態與整列點擊判斷, 比分隔線複雜, 未做); 沒有複製單筆內容。
+- **視窗互動**: 沒有點擊整列反白 / 選取 (已評估: 需記錄選取狀態與整列點擊判斷, 比分隔線複雜, 未做)。
 - **等級**: 沒有 Fatal / Exception, 沒有「最低等級」篩選 (enum 順序也不支援)。
 - **分類篩選**: 視窗只能依等級、來源 (Log / Unity) 與文字搜尋, 不能依自訂分類開關; `Log` 也沒有依分類過濾。
-- **sink 錯誤隔離 / 非同步**: sink 例外會往上拋; 沒有背景執行緒或佇列。
-- **持久化**: 沒有寫檔 sink、沒有匯出或複製功能 (行動平台寫檔涉及路徑與權限, 屬平台風險)。
+- **非同步**: 沒有背景執行緒或佇列 (sink 例外隔離已完成, 見 4.2)。
+- **持久化**: 等待讀寫系統完成後, 以寫檔 sink 實作 (行動平台寫檔涉及路徑與權限, 屬平台風險)。
 - **視窗開關**: 沒有快捷鍵或手勢, 需專案自行呼叫 `DebugLogs.isGUILog`。
 - **容量**: 只能在啟動時由設定檔決定, 執行中不能修改。
 - **相同訊息合併**: 只在顯示層合併, 儲存仍是每筆一份, 不是儲存端減量。
-- **設定檔切換**: 不能依建置設定檔切換不同 `LogSettings`; 不支援逐欄位覆蓋。
+- **設定檔切換**: 不能依建置設定檔切換不同 `LogSettings`; 不支援逐欄位覆蓋 (兩者列入 8.2 刻意不做)。
+
+### 8.1 Android 待驗證
+
+- 視窗縮放是否需納入像素密度 (目前只依畫面高度; 橫向 1080p 推測核取方塊約 1.3 mm)。
+- 觸控操作與拖曳。
+- 正式版關閉 Log 時每幀的 GC Alloc (以 Profiler 確認)。
+- `GUIUtility.systemCopyBuffer` 的行為 (複製功能)。
+
+### 8.2 刻意不做
+
+- Console 點兩下跳到呼叫端。
+- 建置前檢查。
+- 依建置類型切換設定。
+- 逐欄位覆蓋。
+- 執行中修改容量。
 
 ---
 

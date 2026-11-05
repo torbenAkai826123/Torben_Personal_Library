@@ -274,4 +274,175 @@ public sealed class LogSettingsInstallTests
         LogAssert.NoUnexpectedReceived();
         Assert.That(CrossObject.Instance.GetComponent<DebugWindow>().enabled, Is.True);
     }
+    // ---- Development Alert ----
+
+    private const string AlertPattern = "Development Alert";
+
+    private static bool HasMessage(LogHistorySink history, string part)
+        => System.Array.Exists(Entries(history), entry => entry.Message != null && entry.Message.Contains(part));
+
+    [Test]
+    public void DevelopmentAlert_NoProblem_NoOutput()
+    {
+        var settings = CreateSettings();
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Error;
+
+        DebugLogs.Install(settings);
+
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
+    }
+
+    [Test]
+    public void DevelopmentAlert_Off_NoOutput()
+    {
+        var settings = CreateSettings();
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Off;
+        settings.window.logCapacity = 0;
+
+        DebugLogs.Install(settings);
+
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
+    }
+
+    [Test]
+    public void DevelopmentAlert_Warning_OneWarning()
+    {
+        var settings = CreateSettings();
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Warning;
+        settings.window.logCapacity = 0;
+
+        DebugLogs.Install(settings);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, "\n- window.logCapacity is 0"), Is.True);
+        Assert.That(DebugWindow.LogCapacity, Is.EqualTo(1), "容量小於 1 時維持現況: 以 1 計");
+    }
+
+    [Test]
+    public void DevelopmentAlert_Error_OneError()
+    {
+        var settings = CreateSettings();
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Error;
+        settings.window.unityCapacity = DebugWindowOptions.MaxRecommendedCapacity + 1;
+        // Error 需在發出前標明為預期中的錯誤 (正規表示式不跨行比對, 內容由 UnityHistory 確認)
+        LogAssert.Expect(LogType.Error, new Regex(AlertPattern));
+
+        DebugLogs.Install(settings);
+
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, "window.unityCapacity is 10001"), Is.True);
+    }
+
+    [Test]
+    public void DevelopmentAlert_AtRecommendedCapacity_NoOutput()
+    {
+        var settings = CreateSettings();
+        settings.window.logCapacity = DebugWindowOptions.MaxRecommendedCapacity;
+
+        DebugLogs.Install(settings);
+
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
+    }
+
+    // 多個問題合併為一則: 容量 (兩項) + 堆疊追蹤重複 + 等級顏色重複
+    [Test]
+    public void DevelopmentAlert_MultipleProblems_MergedIntoOneMessage()
+    {
+        var settings = CreateSettings();
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Error;
+        settings.window.logCapacity = 0;
+        settings.window.unityCapacity = -5;
+        settings.log.stackTrace = new[]
+        {
+            new LogLevelSwitch(LogLevel.Error, true),
+            new LogLevelSwitch(LogLevel.Error, false),
+            new LogLevelSwitch(LogLevel.Error, false),
+        };
+        settings.window.levelColors = new[]
+        {
+            new LogLevelColor(LogLevel.Warning, "#FFFFFF"),
+            new LogLevelColor(LogLevel.Warning, "#000000"),
+        };
+        LogAssert.Expect(LogType.Error, new Regex(AlertPattern));
+
+        DebugLogs.Install(settings);
+
+        LogAssert.NoUnexpectedReceived();
+        var alert = System.Array.Find(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains(AlertPattern)).Message;
+        Assert.That(alert, Does.Contain("window.logCapacity is 0"));
+        Assert.That(alert, Does.Contain("window.unityCapacity is -5"));
+        Assert.That(alert, Does.Contain("log.stackTrace lists Error more than once"));
+        Assert.That(alert, Does.Contain("window.levelColors lists Warning more than once"));
+        Assert.That(alert.Split('\n').Length, Is.EqualTo(5), "標題一行 + 四個問題各一行 (同一等級重複三次只算一項)");
+    }
+
+    // 找不到設定檔: 讀不到等級, 一律以 Warning 提醒, 訊息內容不變
+    [Test]
+    public void DevelopmentAlert_NoSettings_Warning()
+    {
+        DebugLogs.Install(null);
+
+        LogAssert.Expect(LogType.Warning, new Regex("LogSettings not found"));
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, "LogSettings not found"), Is.True);
+    }
+
+    // 發出時已開始收集 Unity 訊息: GUI 視窗的 UnityHistory 收得到
+    [Test]
+    public void DevelopmentAlert_RecordedInUnityHistory()
+    {
+        var settings = CreateSettings();
+        settings.window.logCapacity = 0;
+
+        DebugLogs.Install(settings);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.True);
+    }
+
+    // isUnityLog 關閉的設定檔: 提醒仍輸出到 Console, 但不收集 (關閉期間的訊息不補記)
+    [Test]
+    public void DevelopmentAlert_UnityLogOff_NotRecorded()
+    {
+        var settings = CreateSettings();
+        settings.window.logCapacity = 0;
+        settings.output.isUnityLog = false;
+
+        DebugLogs.Install(settings);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
+    }
+
+    // sink 例外隔離: Install 設定 SinkErrorHandler, 以 LogException 輸出 (含 sink 型別名稱), 只有第一次
+    private sealed class ThrowingSink : ILogSink
+    {
+        public void Write(in LogEntry entry) => throw new System.InvalidOperationException("sink failed");
+    }
+
+    [Test]
+    public void SinkError_ReportedOnceWithTypeName_OtherSinksStillWrite()
+    {
+        Log.isPrintLog = true;
+        Log.AddSink(new ThrowingSink());
+        // 預期訊息依出現順序登記: Console sink 先輸出, 接著 ThrowingSink 失敗的回報 (只有第一次)
+        LogAssert.Expect(LogType.Log, "first");
+        LogAssert.Expect(LogType.Exception, new Regex("Sink 'LogSettingsInstallTests\\+ThrowingSink'"));
+        LogAssert.Expect(LogType.Log, "second");
+
+        Assert.DoesNotThrow(() => Log.Information("first"));
+        Log.Information("second");
+        LogAssert.NoUnexpectedReceived();
+
+        // 訊息第一行帶 sink 型別名稱, 後面附原例外; 畫面視窗也收得到
+        var report = System.Array.Find(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains("ThrowingSink"));
+        Assert.That(report.Message, Does.Contain("InvalidOperationException: sink failed"));
+
+        var messages = System.Array.ConvertAll(Entries(DebugWindow.History), entry => entry.Message);
+        Assert.That(messages, Is.EqualTo(new[] { "first", "second" }));
+    }
 }

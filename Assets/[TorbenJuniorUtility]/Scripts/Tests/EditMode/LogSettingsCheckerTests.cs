@@ -136,4 +136,95 @@ public sealed class LogSettingsCheckerTests
         Assert.That(LogSettingsAssets.IsInLibrary("Assets/Game/A.asset"), Is.False);
         Assert.That(LogSettingsAssets.IsInLibrary(LogSettingsAssets.LibraryRoot + "Other/A.asset"), Is.False);
     }
+    // ---- Development Alert (Project Settings 頁面) ----
+
+    private static DevelopmentAlertLevel AlertLevelOf(SerializedObject serialized)
+        => (DevelopmentAlertLevel)serialized.FindProperty(LogSettingsAssets.DevelopmentAlertLevelPath).enumValueIndex;
+
+    [Test]
+    public void DevelopmentAlert_PageEditsEffectiveFile_WithOverride()
+    {
+        var defaultSettings = CreateTemp("Default");
+        var projectOverride = CreateTemp("Override");
+        defaultSettings.projectOverride = projectOverride;
+
+        using (var serialized = LogSettingsAssets.CreateDevelopmentAlertObject(defaultSettings))
+        {
+            Assert.That(serialized.targetObject, Is.SameAs(projectOverride));
+            Assert.That(AlertLevelOf(serialized), Is.EqualTo(DevelopmentAlertLevel.Warning), "預設值為 Warning");
+            serialized.FindProperty(LogSettingsAssets.DevelopmentAlertLevelPath).enumValueIndex = (int)DevelopmentAlertLevel.Error;
+            serialized.ApplyModifiedProperties();
+        }
+
+        Assert.That(projectOverride.DevelopmentAlert.level, Is.EqualTo(DevelopmentAlertLevel.Error));
+        Assert.That(defaultSettings.DevelopmentAlert.level, Is.EqualTo(DevelopmentAlertLevel.Warning));
+    }
+
+    [Test]
+    public void DevelopmentAlert_PageEditsDefaultFile_WithoutOverride()
+    {
+        var defaultSettings = CreateTemp("Default");
+
+        using (var serialized = LogSettingsAssets.CreateDevelopmentAlertObject(defaultSettings))
+            Assert.That(serialized.targetObject, Is.SameAs(defaultSettings));
+    }
+
+    [Test]
+    public void DevelopmentAlert_EditSupportsUndo()
+    {
+        var defaultSettings = CreateTemp("Default");
+        using (var serialized = LogSettingsAssets.CreateDevelopmentAlertObject(defaultSettings))
+        {
+            serialized.FindProperty(LogSettingsAssets.DevelopmentAlertLevelPath).enumValueIndex = (int)DevelopmentAlertLevel.Off;
+            serialized.ApplyModifiedProperties();
+        }
+        Assert.That(defaultSettings.DevelopmentAlert.level, Is.EqualTo(DevelopmentAlertLevel.Off));
+
+        Undo.PerformUndo();
+
+        Assert.That(defaultSettings.DevelopmentAlert.level, Is.EqualTo(DevelopmentAlertLevel.Warning));
+    }
+
+    // 預設 Inspector 以 HideInInspector 隱藏; 自訂的 LogSettingsInspector 只畫 projectOverride / log / output / window
+    [Test]
+    public void DevelopmentAlert_HiddenInInspector()
+    {
+        var field = typeof(LogSettings).GetField("developmentAlert",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        Assert.That(field, Is.Not.Null);
+        Assert.That(System.Attribute.IsDefined(field, typeof(HideInInspector)), Is.True);
+        Assert.That(System.Attribute.IsDefined(field, typeof(SerializeField)), Is.True);
+    }
+
+    // ---- 覆蓋檔遺失 (Missing) ----
+
+    [Test]
+    public void OverrideMissing_DeletedFile_Warns()
+    {
+        var defaultSettings = CreateTemp("Default");
+        var projectOverride = CreateTemp("Override");
+        LogSettingsAssets.LinkOverride(defaultSettings, projectOverride);
+        Assert.That(LogSettingsChecker.IsOverrideMissing(defaultSettings), Is.False);
+
+        AssetDatabase.DeleteAsset(AssetDatabase.GetAssetPath(projectOverride));
+
+        Assert.That(LogSettingsChecker.IsOverrideMissing(defaultSettings), Is.True);
+        var problems = Problems(LogSettingsChecker.CheckAssets(defaultSettings, new List<LogSettings> { defaultSettings }));
+        Assert.That(problems.Count, Is.EqualTo(1));
+        Assert.That(problems[0].Level, Is.EqualTo(LogSettingsIssueLevel.Warning));
+        Assert.That(problems[0].Message, Does.Contain("Missing"));
+        Assert.That(defaultSettings.ResolveEffective(), Is.SameAs(defaultSettings), "建置版改用預設檔");
+    }
+
+    [Test]
+    public void OverrideMissing_NoLink_False()
+    {
+        var defaultSettings = CreateTemp("Default");
+        Assert.That(LogSettingsChecker.IsOverrideMissing(defaultSettings), Is.False);
+    }
+
+    [Test]
+    public void MaxRecommendedCapacity_SharedWithRuntime()
+        => Assert.That(LogSettingsChecker.MaxRecommendedCapacity, Is.EqualTo(DebugWindowOptions.MaxRecommendedCapacity));
 }

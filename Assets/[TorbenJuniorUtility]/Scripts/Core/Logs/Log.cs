@@ -49,14 +49,53 @@ namespace Torben
                 System.Array.Copy(current, 0, next, 0, index);
                 System.Array.Copy(current, index + 1, next, index, current.Length - index - 1);
                 sinks = next;
+                failedSinks?.Remove(sink);  // 重新加入後再失敗時會再回報一次
             }
         }
 
-        /// <summary>移除全部 sink.</summary>
+        /// <summary>移除全部 sink (一併清除 SinkErrorHandler 的回報記錄).</summary>
         /// <remarks>配置: 零配置.</remarks>
         public static void ClearSinks()
         {
-            lock (sinkGate) sinks = emptySinks;
+            lock (sinkGate)
+            {
+                sinks = emptySinks;
+                failedSinks = null;
+            }
+        }
+
+        // ---- sink 例外隔離 ----
+
+        /// <summary>
+        /// sink 的 Write 拋出例外時呼叫 (參數為該 sink 與例外). 每個 sink 實例只回報第一次失敗, 之後的失敗不再回報;
+        /// RemoveSink / ClearSinks 會清除記錄. 例外不會傳回呼叫 Log 的地方, 失敗的 sink 也不會被移除, 其他 sink 照常收到訊息.
+        /// 回報期間同一執行緒上的 Log 寫入會被略過 (避免遞迴), 本處理器拋出的例外會被捕捉並忽略. null 時不回報.
+        /// Runtime 的 DebugLogs.Install 會設定為以 UnityEngine.Debug.LogException 輸出.
+        /// </summary>
+        public static System.Action<ILogSink, System.Exception> SinkErrorHandler;
+
+        // 已回報過的 sink (以參考比對); 第一次有 sink 失敗時才建立, 只在 sinkGate 內存取
+        private static System.Collections.Generic.List<ILogSink> failedSinks;
+
+        // 正在回報 sink 錯誤: 為 true 時同一執行緒上的 Log 寫入直接略過
+        [System.ThreadStatic] private static bool reportingSinkError;
+
+        // 只在例外發生時執行; 無例外的寫入路徑不經過這裡
+        private static void ReportSinkError(ILogSink sink, System.Exception exception)
+        {
+            var handler = SinkErrorHandler;
+            if (handler == null) return;
+            lock (sinkGate)
+            {
+                if (failedSinks == null) failedSinks = new System.Collections.Generic.List<ILogSink>();
+                for (int i = 0; i < failedSinks.Count; i++)
+                    if (ReferenceEquals(failedSinks[i], sink)) return;
+                failedSinks.Add(sink);
+            }
+            reportingSinkError = true;
+            try { handler(sink, exception); }
+            catch (System.Exception) { }    // 回報失敗時忽略, 不傳回呼叫端
+            finally { reportingSinkError = false; }
         }
 
         /// <summary>
@@ -176,13 +215,18 @@ namespace Torben
             string callerMemberName, string callerFilePath, int callerLineNumber)
         {
             if (!IsEnabled(level)) return; // 總開關關閉、沒有 sink, 或 Debug 訊息未開啟時都不輸出
+            if (reportingSinkError) return; // 回報 sink 錯誤期間 (同一執行緒) 不再寫入, 避免遞迴
             if (category == null) category = LogCategoryEmpty.None;
             var stackTrace = IsStackTraceEnabled(level) ? LogStackTrace.Capture() : null;
             var entry = new LogEntry(level, category, message, System.DateTime.UtcNow,
                 callerFilePath, callerMemberName, callerLineNumber, stackTrace);
             var current = sinks;
             for (int i = 0; i < current.Length; i++)
-                current[i].Write(entry);
+            {
+                // 一個 sink 失敗不影響其他 sink, 例外也不傳回呼叫端
+                try { current[i].Write(in entry); }
+                catch (System.Exception e) { ReportSinkError(current[i], e); }
+            }
         }
     }
 }

@@ -34,6 +34,7 @@ public sealed class DebugWindowTests
         DebugWindow.ShowLocation = false;
         DebugWindow.Collapse = false;
         DebugWindow.AutoScroll = true;
+        DebugWindow.VisibleButtons = DebugWindowButtons.All;
         DebugWindow.ResetPosition();
         DebugWindow.SearchText = string.Empty;
         foreach (LogLevel level in System.Enum.GetValues(typeof(LogLevel)))
@@ -356,5 +357,93 @@ public sealed class DebugWindowTests
         yield return null;
 
         Assert.That(CrossObject.Instance.GetComponent<DebugWindow>().enabled, Is.True);
+    }
+    // ---- 複製 ----
+
+    private static DebugWindow OpenedWindow() => CrossObject.Instance.GetComponent<DebugWindow>();
+
+    [UnityTest]
+    public IEnumerator Copy_SingleRow_WritesFormattedTextToClipboard()
+    {
+        DebugLogs.isGUILog = true;
+        Log.Information("first");
+        Log.Warning("<b>second</b>");
+        yield return null;
+        yield return null;
+
+        var window = OpenedWindow();
+        GUIUtility.systemCopyBuffer = string.Empty;
+        string text = window.CopyRow(1);
+
+        Assert.That(GUIUtility.systemCopyBuffer, Is.EqualTo(text));
+        var lines = text.Split('\n');
+        Assert.That(lines[0], Is.EqualTo("[Warning] second"), "rich text 標籤去除");
+        Assert.That(lines[1], Does.StartWith("(").And.Contains(") ").And.EndWith("DebugWindowTests.cs:" + window.GetVisibleEntry(1).CallerLineNumber));
+        Assert.That(lines.Length, Is.EqualTo(2), "Warning 預設不擷取堆疊");
+    }
+
+    [UnityTest]
+    public IEnumerator Copy_All_FollowsFiltersSearchAndCollapse()
+    {
+        DebugLogs.isGUILog = true;
+        Log.Information("apple");
+        Log.Information("banana");
+        Log.Warning("apple pie");
+        for (int i = 0; i < 3; i++) Log.Information("apple");
+        Debug.Log("unity apple");
+        DebugWindow.SearchText = "apple";
+        DebugWindow.SetLevelVisible(LogLevel.Warning, false);
+        DebugWindow.ShowUnityMessages = false;
+        DebugWindow.Collapse = true;
+        yield return null;
+        yield return null;
+
+        string text = OpenedWindow().CopyAll();
+
+        Assert.That(GUIUtility.systemCopyBuffer, Is.EqualTo(text));
+        var items = text.Split(new[] { "\n\n" }, System.StringSplitOptions.None);
+        // banana (搜尋)、Warning (等級)、Unity (來源) 被篩掉; 合併比對呼叫端行號, 兩處呼叫各成一組
+        Assert.That(items.Length, Is.EqualTo(2));
+        Assert.That(items[0], Does.StartWith("[Normal] apple\n"));
+        Assert.That(items[1], Does.StartWith("[Normal] apple (x3)\n"));
+
+        DebugWindow.Collapse = false;
+        DebugWindow.ShowUnityMessages = true;
+        yield return null;
+        yield return null;
+        items = OpenedWindow().CopyAll().Split(new[] { "\n\n" }, System.StringSplitOptions.None);
+        Assert.That(items.Length, Is.EqualTo(5));
+        Assert.That(items[4], Does.StartWith("[Normal] [Unity] unity apple"), "依顯示順序");
+    }
+
+    [UnityTest]
+    public IEnumerator Copy_ErrorRow_IncludesStackTrace()
+    {
+        DebugLogs.isGUILog = true;
+        Log.Error("broken");
+        yield return null;
+        yield return null;
+
+        var window = OpenedWindow();
+        string text = window.CopyRow(0);
+
+        Assert.That(text, Does.StartWith("[Error] broken\n"));
+        Assert.That(text, Does.EndWith("\n" + window.GetVisibleEntry(0).StackTrace.Text));
+    }
+
+    [UnityTest]
+    public IEnumerator Copy_ButtonsFollowCopyFlag()
+    {
+        DebugLogs.isGUILog = true;
+        Log.Information("one");
+        Log.Information("two");
+        yield return null;
+        yield return null;
+        Assert.That(OpenedWindow().DrawnCopyButtons, Is.EqualTo(3), "每列一個 + 工具列一個");
+
+        DebugWindow.VisibleButtons = DebugWindowButtons.All & ~DebugWindowButtons.Copy;
+        yield return null;
+        yield return null;
+        Assert.That(OpenedWindow().DrawnCopyButtons, Is.EqualTo(0));
     }
 }

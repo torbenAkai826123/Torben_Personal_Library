@@ -20,6 +20,8 @@ namespace Torben
         private const float FoldHeight = 14f;         // 展開按鈕的高度
         private static readonly Color separatorColor = new Color(1f, 1f, 1f, 0.12f);   // 列分隔線
         private const float DetailOffset = 2f;        // 第二行與訊息之間多留的距離
+        private const float CopiedFeedbackSeconds = 1f;   // 按下複製後顯示已複製狀態的時間
+        private static readonly Color copiedColor = new Color(0.45f, 0.85f, 0.45f);    // 已複製狀態的按鈕底色
 
         private static readonly string[] levelNames = System.Enum.GetNames(typeof(LogLevel));
         private static readonly int levelCount = levelNames.Length;
@@ -76,6 +78,12 @@ namespace Torben
         private bool rowsCollapsed;         // 上次重算可見清單時的合併設定
         private bool drawTime;              // 本次 Layout 的顯示設定
         private bool drawLocation;
+        private bool drawCopy;              // 本次 Layout 是否畫複製按鈕
+        private bool drawCopiedAll;         // 本次 Layout 時工具列 Copy 是否為已複製狀態
+        private long drawCopiedSequence = -1;   // 本次 Layout 時為已複製狀態的列 (流水號); -1 為沒有
+        private long copiedSequence = -1;   // 最後一次單筆複製的列 (流水號)
+        private float copiedRowUntil;       // 單筆 / 全部複製的已複製狀態結束時間 (Time.realtimeSinceStartup)
+        private float copiedAllUntil;
         private bool seenAutoScroll;        // 上次 Layout 時的自動捲動設定, 由關轉開時立即捲到最下方
         private int numberDigits;           // 行號欄寬目前容納的位數
         private string projectRoot;         // Editor 中為專案根目錄, 用來縮短路徑; 建置版為 null
@@ -100,6 +108,10 @@ namespace Torben
         private GUIContent sourceLogLabel;
         private GUIContent sourceNoneLabel;
         private GUIContent clearLabel;
+        private GUIContent copyAllLabel;
+        private GUIContent copiedAllLabel;
+        private GUIContent copyRowLabel;
+        private GUIContent copiedRowLabel;
         private GUIContent closeLabel;
         private GUIContent timeLabel;
         private GUIContent locationLabel;
@@ -371,6 +383,10 @@ namespace Torben
             sourceLogLabel = new GUIContent("Unity Off", "Unity messages hidden (click: show both)");
             sourceNoneLabel = new GUIContent("None", "Log and Unity messages hidden (click: show both)");
             clearLabel = new GUIContent("Clear", "Clear Log messages (Unity messages are kept)");
+            copyAllLabel = new GUIContent("Copy", "Copy all visible messages");
+            copiedAllLabel = new GUIContent("Copied", "Copied all visible messages");
+            copyRowLabel = new GUIContent("C", "Copy this message");
+            copiedRowLabel = new GUIContent("C", "Copied");
             closeLabel = new GUIContent("X", "Close");
             timeLabel = new GUIContent("Time", "Show time");
             locationLabel = new GUIContent("Loc", "Show source location");
@@ -424,6 +440,7 @@ namespace Torben
             // 只在 Layout 事件更新資料, 讓 Layout 與 Repaint 畫出的控制項數量一致
             var e = Event.current;
             if (e.type == EventType.Layout) Refresh();
+            if (e.type == EventType.Repaint) DrawnCopyButtons = 0;
 
             // 先記下按下位置: 其他控制項處理後會把事件標成 Used, 到 Clear 時就讀不到了
             bool isMouseDown = e.type == EventType.MouseDown && new Rect(Vector2.zero, size).Contains(e.mousePosition);
@@ -431,7 +448,7 @@ namespace Torben
 
             // 隱藏的按鈕不佔位置; 第一列的按鈕全部隱藏時整列不畫
             var buttons = visibleButtons;
-            const DebugWindowButtons firstRow = DebugWindowButtons.Levels | DebugWindowButtons.Source | DebugWindowButtons.Clear | DebugWindowButtons.Close;
+            const DebugWindowButtons firstRow = DebugWindowButtons.Levels | DebugWindowButtons.Source | DebugWindowButtons.Copy | DebugWindowButtons.Clear | DebugWindowButtons.Close;
             if ((buttons & firstRow) != 0)
             {
                 GUILayout.BeginHorizontal();
@@ -445,6 +462,7 @@ namespace Torben
                 }
                 if (HasButton(buttons, DebugWindowButtons.Source)) DrawSourceButton();
                 GUILayout.FlexibleSpace();
+                if (drawCopy) DrawCopyAllButton();
                 if (HasButton(buttons, DebugWindowButtons.Clear)) DrawClearButton(isMouseDown, mouseDownPosition);
                 if (HasButton(buttons, DebugWindowButtons.Close) && GUILayout.Button(closeLabel))
                     DebugLogs.isGUILog = false;   // 與關閉 isGUILog 相同, 一併恢復 Console 輸出
@@ -647,6 +665,7 @@ namespace Torben
             if (GUILayout.Button(rowExpanded[row] ? collapseRowLabel : expandRowLabel, foldStyle, GUILayout.Width(FoldWidth)))
                 pendingToggleRow = row;
             GUI.enabled = oldEnabled;
+            if (drawCopy) DrawCopyRowButton(row, count);
             GUILayout.Label(source.Lines[i], lineStyle);
             if (count > 1) GUILayout.Label(CountNumberText(count), badgeStyle, GUILayout.ExpandWidth(false));
             GUILayout.EndHorizontal();
@@ -658,7 +677,7 @@ namespace Torben
                 string location = drawLocation ? source.GetLocation(i, projectRoot) : string.Empty;
                 GUILayout.Space(DetailOffset);
                 GUILayout.BeginHorizontal();
-                GUILayout.Space(numberStyle.fixedWidth + FoldWidth + 6f);
+                GUILayout.Space(RowIndent());
                 if (rowTime) GUILayout.Label(source.GetTime(i), inlineDetailStyle, GUILayout.ExpandWidth(false));
                 if (location.Length > 0) DrawLocation(source, i, location);
                 GUILayout.FlexibleSpace();
@@ -668,11 +687,72 @@ namespace Torben
             if (rowExpanded[row] && stackTrace != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Space(numberStyle.fixedWidth + FoldWidth + 6f);
+                GUILayout.Space(RowIndent());
                 GUILayout.Label(stackTrace.Text, detailStyle);
                 GUILayout.EndHorizontal();
             }
         }
+
+        // 第二行與展開內容的左側縮排: 行號 + 展開按鈕 (+ 複製按鈕) 與其邊距
+        private float RowIndent() => numberStyle.fixedWidth + FoldWidth + 6f + (drawCopy ? FoldWidth + 4f : 0f);
+
+        // 每一列的複製按鈕: 位置與尺寸同展開按鈕; 按下後約 1 秒顯示已複製狀態 (底色)
+        private void DrawCopyRowButton(int row, int count)
+        {
+            if (Event.current.type == EventType.Repaint) DrawnCopyButtons++;
+            bool isCopied = drawCopiedSequence >= 0 && drawCopiedSequence == SequenceOf(visible[row]);
+            var oldColor = GUI.backgroundColor;
+            if (isCopied) GUI.backgroundColor = copiedColor;
+            if (GUILayout.Button(isCopied ? copiedRowLabel : copyRowLabel, foldStyle, GUILayout.Width(FoldWidth))) CopyRow(row);
+            GUI.backgroundColor = oldColor;
+        }
+
+        // 工具列的 Copy: 複製目前篩選後看得到的全部內容; 按下後約 1 秒顯示 Copied
+        private void DrawCopyAllButton()
+        {
+            if (Event.current.type == EventType.Repaint) DrawnCopyButtons++;
+            var oldColor = GUI.backgroundColor;
+            if (drawCopiedAll) GUI.backgroundColor = copiedColor;
+            if (GUILayout.Button(drawCopiedAll ? copiedAllLabel : copyAllLabel, GUILayout.ExpandWidth(false))) CopyAll();
+            GUI.backgroundColor = oldColor;
+        }
+
+        // 複製一列 (合併時為第一次出現的那筆, 附上次數) 到系統剪貼簿; 回傳複製的文字. 只在按下按鈕時配置
+        internal string CopyRow(int row)
+        {
+            if (row < 0 || row >= visibleCount) return null;
+            string text = FormatRowForCopy(row);
+            GUIUtility.systemCopyBuffer = text;
+            copiedSequence = SequenceOf(visible[row]);
+            copiedRowUntil = Time.realtimeSinceStartup + CopiedFeedbackSeconds;
+            return text;
+        }
+
+        // 依顯示順序複製目前看得到的每一列 (套用等級、來源、搜尋與 Collapse), 每筆之間空一行; 回傳複製的文字
+        internal string CopyAll()
+        {
+            var text = new System.Text.StringBuilder();
+            for (int row = 0; row < visibleCount; row++)
+            {
+                if (row > 0) text.Append("\n\n");
+                text.Append(FormatRowForCopy(row));
+            }
+            string result = text.ToString();
+            GUIUtility.systemCopyBuffer = result;
+            copiedAllUntil = Time.realtimeSinceStartup + CopiedFeedbackSeconds;
+            return result;
+        }
+
+        private string FormatRowForCopy(int row)
+        {
+            int index = visible[row];
+            var source = SourceOf(index, out int i);
+            int count = rowsCollapsed ? groupCount[groupOf[index]] : 1;
+            return LogText.FormatForCopy(source.Snapshot[i], count, projectRoot);
+        }
+
+        // 測試用: 上次 Repaint 畫出的複製按鈕數 (每一列 + 工具列)
+        internal int DrawnCopyButtons { get; private set; }
 
         // 列與列之間 1px 的分隔線, 也當對齊的參考線
         private static void DrawSeparator()
@@ -815,6 +895,10 @@ namespace Torben
             if (expandChanged) UpdateRowExpanded();
             drawTime = showTime;
             drawLocation = showLocation;
+            drawCopy = HasButton(visibleButtons, DebugWindowButtons.Copy);
+            float now = Time.realtimeSinceStartup;
+            drawCopiedAll = now < copiedAllUntil;
+            drawCopiedSequence = now < copiedRowUntil ? copiedSequence : -1;
 
             if (linesAdded) UpdateNumberWidth();
             if (autoScroll && (linesAdded || !seenAutoScroll)) scroll.y = float.MaxValue;
@@ -1037,18 +1121,7 @@ namespace Torben
             {
                 var text = Locations[i];
                 if (text != null) return text;
-                ref readonly var entry = ref Snapshot[i];
-                string file = null;
-                int line = 0;
-                if (entry.HasCaller)
-                {
-                    file = LogText.ToDisplayPath(entry.CallerFilePath, projectRoot);
-                    line = entry.CallerLineNumber;
-                }
-                else if (entry.StackTrace != null && LogText.TryParseUnityLocation(entry.StackTrace.Text, out string path, out line))
-                {
-                    file = LogText.ToDisplayPath(path, projectRoot);
-                }
+                LogText.TryGetLocation(Snapshot[i], projectRoot, out string file, out int line);
                 text = file == null ? string.Empty : file + ":" + line;
                 Locations[i] = text;
                 LocationFiles[i] = file;
