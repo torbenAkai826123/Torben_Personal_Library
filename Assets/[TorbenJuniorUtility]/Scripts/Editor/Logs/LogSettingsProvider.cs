@@ -157,8 +157,9 @@ namespace Torben.Editor
             var level = alertObject.FindProperty(LogSettingsAssets.DevelopmentAlertLevelPath);
             if (level == null) return;
             EditorGUILayout.PropertyField(level, new GUIContent("Development Alert",
-                "When the settings have problems at startup (DebugLogs.Install), report them once with Debug.LogWarning (Warning) or Debug.LogError (Error)."));
+                "When the settings have problems at startup (DebugLogs.Install), or development settings are still enabled in a non-development build, report them once with Debug.LogWarning (Warning) or Debug.LogError (Error)."));
             alertObject.ApplyModifiedProperties();
+            EditorGUILayout.LabelField("Off disables both settings problem alerts and the reminder for development settings in non-development builds.", EditorStyles.wordWrappedMiniLabel);
         }
 
         // 建置: 開關在左; 各平台與 Build Profile 的狀態以表格顯示

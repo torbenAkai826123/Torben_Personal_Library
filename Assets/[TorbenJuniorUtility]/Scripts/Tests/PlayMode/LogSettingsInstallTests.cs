@@ -418,6 +418,200 @@ public sealed class LogSettingsInstallTests
         Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
     }
 
+    // ---- Development Alert: 正式版仍開著的開發設定 (B 類) ----
+
+    private const string ReleaseHeader = "Development settings enabled in a non-development build:";
+
+    private LogSettings CreateAllDevelopmentSettings()
+    {
+        var settings = CreateSettings();
+        settings.output.openWindowOnStart = true;
+        settings.log.isPrintLog = true;
+        settings.log.isDebugLog = true;
+        return settings;
+    }
+
+    private static string FindAlert() => System.Array.Find(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains(AlertPattern)).Message;
+
+    [Test]
+    public void ReleaseProblems_DebugBuild_NoItems()
+    {
+        var problems = new List<string>();
+
+        DebugLogs.CollectReleaseProblems(CreateAllDevelopmentSettings(), true, true, problems);
+
+        Assert.That(problems, Is.Empty);
+    }
+
+    [Test]
+    public void ReleaseProblems_AllOff_NoItems()
+    {
+        var problems = new List<string>();
+
+        DebugLogs.CollectReleaseProblems(CreateSettings(), false, false, problems);
+
+        Assert.That(problems, Is.Empty);
+    }
+
+    [TestCase("output.openWindowOnStart")]
+    [TestCase("log.isPrintLog")]
+    [TestCase("log.isDebugLog")]
+    [TestCase("TORBEN_LOG_DEBUG")]
+    public void ReleaseProblems_EachItemAlone(string item)
+    {
+        var settings = CreateSettings();
+        settings.output.openWindowOnStart = item == "output.openWindowOnStart";
+        settings.log.isPrintLog = item == "log.isPrintLog";
+        settings.log.isDebugLog = item == "log.isDebugLog";
+        var problems = new List<string>();
+
+        DebugLogs.CollectReleaseProblems(settings, false, item == "TORBEN_LOG_DEBUG", problems);
+
+        Assert.That(problems.Count, Is.EqualTo(1));
+        Assert.That(problems[0], Does.StartWith(item));
+    }
+
+    [Test]
+    public void ReleaseProblems_AllOn_AllItemsInOrder()
+    {
+        var problems = new List<string>();
+
+        DebugLogs.CollectReleaseProblems(CreateAllDevelopmentSettings(), false, true, problems);
+
+        Assert.That(problems.Count, Is.EqualTo(4));
+        Assert.That(problems[0], Is.EqualTo("output.openWindowOnStart"));
+        Assert.That(problems[1], Is.EqualTo("log.isPrintLog"));
+        Assert.That(problems[2], Is.EqualTo("log.isDebugLog"));
+        Assert.That(problems[3], Does.StartWith("TORBEN_LOG_DEBUG"));
+    }
+
+    // 找不到設定檔: 前三項依欄位初始值 (皆為 false), TORBEN_LOG_DEBUG 照常判斷
+    [Test]
+    public void ReleaseProblems_NullSettings_UsesFieldDefaults()
+    {
+        var problems = new List<string>();
+
+        DebugLogs.CollectReleaseProblems(null, false, true, problems);
+
+        Assert.That(problems.Count, Is.EqualTo(1));
+        Assert.That(problems[0], Does.StartWith("TORBEN_LOG_DEBUG"));
+    }
+
+    // A 類與 B 類同時存在: 合併為一則, 兩段都在
+    [Test]
+    public void ReleaseAlert_WithSettingsProblems_MergedIntoOneMessage()
+    {
+        var settings = CreateSettings();
+        settings.log.isPrintLog = true;
+        settings.window.logCapacity = 0;
+
+        DebugLogs.Install(settings, false, false);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        LogAssert.NoUnexpectedReceived();
+        var alerts = System.Array.FindAll(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains(AlertPattern));
+        Assert.That(alerts.Length, Is.EqualTo(1));
+        var lines = alerts[0].Message.Split('\n');
+        Assert.That(lines[1], Does.StartWith("- window.logCapacity is 0"));
+        Assert.That(lines[2], Is.EqualTo(ReleaseHeader));
+        Assert.That(lines[3], Is.EqualTo("- log.isPrintLog"));
+        Assert.That(lines[4], Does.StartWith("If this is intentional, set Development Alert to Off"));
+        Assert.That(lines.Length, Is.EqualTo(5));
+    }
+
+    // 只有 B 類: 只有 B 段 (標題下一行就是 B 段標題)
+    [Test]
+    public void ReleaseAlert_OnlyReleaseProblems_OnlyReleaseSection()
+    {
+        var settings = CreateSettings();
+        settings.log.isDebugLog = true;
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Error;
+        LogAssert.Expect(LogType.Error, new Regex(AlertPattern));
+
+        DebugLogs.Install(settings, false, true);
+
+        LogAssert.NoUnexpectedReceived();
+        var lines = FindAlert().Split('\n');
+        Assert.That(lines[1], Is.EqualTo(ReleaseHeader));
+        Assert.That(lines[2], Is.EqualTo("- log.isDebugLog"));
+        Assert.That(lines[3], Does.StartWith("- TORBEN_LOG_DEBUG"));
+        Assert.That(lines[4], Does.StartWith("If this is intentional"));
+        Assert.That(lines.Length, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void ReleaseAlert_Off_NoOutput()
+    {
+        var settings = CreateSettings();
+        settings.log.isPrintLog = true;
+        settings.window.logCapacity = 0;
+        settings.DevelopmentAlert.level = DevelopmentAlertLevel.Off;
+
+        DebugLogs.Install(settings, false, true);
+
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
+    }
+
+    // 開發版 (含 Editor) 不檢查: 四項都開著也沒有輸出
+    [Test]
+    public void ReleaseAlert_DebugBuild_NoOutput()
+    {
+        var settings = CreateSettings();
+        settings.log.isPrintLog = true;
+        settings.log.isDebugLog = true;
+
+        DebugLogs.Install(settings, true, true);
+
+        LogAssert.NoUnexpectedReceived();
+        Assert.That(HasMessage(DebugWindow.UnityHistory, AlertPattern), Is.False);
+    }
+
+    // 訊息包含生效中設定檔的名稱: 預設檔
+    [Test]
+    public void ReleaseAlert_NamesDefaultFile()
+    {
+        var settings = CreateSettings();
+        settings.name = "LogSettings.Default";
+        settings.log.isPrintLog = true;
+
+        DebugLogs.Install(settings, false, false);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        Assert.That(FindAlert(), Does.EndWith("set Development Alert to Off in LogSettings.Default."));
+    }
+
+    // 訊息包含生效中設定檔的名稱: 覆蓋檔 (檢查的是覆蓋檔的值與等級)
+    [Test]
+    public void ReleaseAlert_NamesOverrideFile()
+    {
+        var defaultSettings = CreateSettings();
+        defaultSettings.name = "LogSettings.Default";
+        defaultSettings.DevelopmentAlert.level = DevelopmentAlertLevel.Off;
+        var projectOverride = CreateSettings();
+        projectOverride.name = "GameLogOverride";
+        projectOverride.log.isPrintLog = true;
+        defaultSettings.projectOverride = projectOverride;
+
+        DebugLogs.Install(defaultSettings, false, false);
+
+        LogAssert.Expect(LogType.Warning, new Regex(AlertPattern));
+        Assert.That(FindAlert(), Does.EndWith("set Development Alert to Off in GameLogOverride."));
+    }
+
+    // 找不到設定檔: 併入「LogSettings not found」那一則 (一律 Warning)
+    [Test]
+    public void ReleaseAlert_NoSettings_MergedIntoNotFoundWarning()
+    {
+        DebugLogs.Install(null, false, true);
+
+        LogAssert.Expect(LogType.Warning, new Regex("LogSettings not found"));
+        LogAssert.NoUnexpectedReceived();
+        var report = System.Array.Find(Entries(DebugWindow.UnityHistory), entry => entry.Message.Contains("LogSettings not found")).Message;
+        Assert.That(report, Does.Contain(ReleaseHeader));
+        Assert.That(report, Does.Contain("\n- TORBEN_LOG_DEBUG"));
+    }
+
     // sink 例外隔離: Install 設定 SinkErrorHandler, 以 LogException 輸出 (含 sink 型別名稱), 只有第一次
     private sealed class ThrowingSink : ILogSink
     {

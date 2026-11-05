@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Torben
@@ -110,7 +111,18 @@ namespace Torben
         // 重設狀態, 加入 Console 與畫面視窗的歷史紀錄兩個 sink, 套用設定檔, 並開始收集 Unity 引擎訊息.
         // settings 為預設檔 (有 projectOverride 時改用它); null 時以欄位初始值運作並警告一次.
         // 最後依 Development Alert 的等級提醒設定問題 (此時已開始收集 Unity 訊息, 畫面視窗收得到)
-        internal static void Install(LogSettings settings)
+        internal static void Install(LogSettings settings) => Install(settings, Debug.isDebugBuild, IsDebugSymbolDefined);
+
+        // TORBEN_LOG_DEBUG 是否有定義. 反映的是 Runtime 組件編譯時的狀態: 以原始碼由遊戲專案編譯時正確;
+        // 打包成 DLL 時只反映打包當下
+#if TORBEN_LOG_DEBUG
+        private const bool IsDebugSymbolDefined = true;
+#else
+        private const bool IsDebugSymbolDefined = false;
+#endif
+
+        // isDebugBuild / isDebugSymbolDefined 可注入, 讓測試模擬正式版 (Editor 與測試中 Debug.isDebugBuild 永遠為 true)
+        internal static void Install(LogSettings settings, bool isDebugBuild, bool isDebugSymbolDefined)
         {
             guiLog = false;
             Log.ClearSinks();   // 關閉 Domain Reload 時靜態狀態會保留, 先清掉避免重複加入
@@ -128,14 +140,61 @@ namespace Torben
             Application.quitting -= OnQuitting;
             Application.quitting += OnQuitting;
 
+            List<string> releaseProblems = null;
+            if (!isDebugBuild)
+            {
+                releaseProblems = new List<string>();
+                CollectReleaseProblems(defaults == null ? effective : null, isDebugBuild, isDebugSymbolDefined, releaseProblems);
+            }
+
             if (defaults == null)
             {
-                Alert(effective.DevelopmentAlert.level, FindProblems(effective));
+                Alert(effective.DevelopmentAlert.level, BuildAlertText(FindProblems(effective), releaseProblems, effective.name));
                 return;
             }
             Object.Destroy(defaults);
-            // 不經過 Log: 此時 Log 的設定剛套用, 避免順序問題. 找不到設定檔時讀不到等級, 一律以 Warning 提醒
-            Debug.LogWarning($"[Log] LogSettings not found at Resources/{LogSettings.ResourcesPath}; using default values. Create it from Project Settings > TorbenTools > Log.");
+            // 不經過 Log: 此時 Log 的設定剛套用, 避免順序問題. 找不到設定檔時讀不到等級, 一律以 Warning 提醒;
+            // 正式版的開發設定 (只可能是 TORBEN_LOG_DEBUG) 併入同一則
+            string text = $"[Log] LogSettings not found at Resources/{LogSettings.ResourcesPath}; using default values. Create it from Project Settings > TorbenTools > Log.";
+            if (releaseProblems != null && releaseProblems.Count > 0)
+                text += ReleaseSection(releaseProblems, "create the settings file and set Development Alert to Off");
+            Debug.LogWarning(text);
+        }
+
+        /// <summary>
+        /// 正式版 (非 Development Build) 仍開著的開發設定 (B 類). isDebugBuild 為 true 時不加入任何項目.
+        /// 依序檢查 output.openWindowOnStart、log.isPrintLog、log.isDebugLog、TORBEN_LOG_DEBUG, 符合的項目名稱加入 problems.
+        /// settings 為生效中的設定檔; null (找不到設定檔) 時前三項依欄位初始值判斷.
+        /// isDebugSymbolDefined 由 Install 以 Runtime 組件編譯時的 TORBEN_LOG_DEBUG 傳入, 打包成 DLL 時只反映打包當下.
+        /// </summary>
+        /// <remarks>配置: 每個項目配置 (加入 problems); 只在載入期使用.</remarks>
+        internal static void CollectReleaseProblems(LogSettings settings, bool isDebugBuild, bool isDebugSymbolDefined, List<string> problems)
+        {
+            if (isDebugBuild) return;
+            var output = settings?.output ?? new DebugLogsOptions();
+            var log = settings?.log ?? new LogOptions();
+            if (output.openWindowOnStart) problems.Add("output.openWindowOnStart");
+            if (log.isPrintLog) problems.Add("log.isPrintLog");
+            if (log.isDebugLog) problems.Add("log.isDebugLog");
+            if (isDebugSymbolDefined) problems.Add("TORBEN_LOG_DEBUG (Log.Debug kept in builds)");
+        }
+
+        // 合併 A 類 (設定問題) 與 B 類 (正式版的開發設定) 為一則訊息; 兩者都沒有時回傳 null
+        // 配置: 每次呼叫配置; 只在載入期使用
+        internal static string BuildAlertText(string settingsProblems, List<string> releaseProblems, string fileName)
+        {
+            bool hasRelease = releaseProblems != null && releaseProblems.Count > 0;
+            if (settingsProblems == null && !hasRelease) return null;
+            string text = "[Log] LogSettings problems (Development Alert; Project Settings > TorbenTools > Log):" + settingsProblems;
+            if (hasRelease) text += ReleaseSection(releaseProblems, $"set Development Alert to Off in {fileName}");
+            return text;
+        }
+
+        private static string ReleaseSection(List<string> releaseProblems, string fix)
+        {
+            var text = new System.Text.StringBuilder("\nDevelopment settings enabled in a non-development build:");
+            foreach (var problem in releaseProblems) text.Append("\n- ").Append(problem);
+            return text.Append("\nIf this is intentional, ").Append(fix).Append('.').ToString();
         }
 
         // sink 的 Write 拋例外時 (每個 sink 只有第一次) 由 Log 呼叫; 不經過 Log.
@@ -147,11 +206,10 @@ namespace Torben
                 $"[Log] Sink '{sink.GetType().FullName}' threw an exception while writing (later failures of this sink are not reported).\n{exception}"));
         }
 
-        // 依等級輸出一則提醒; 不經過 Log. problems 為 null 時不輸出
-        private static void Alert(DevelopmentAlertLevel level, string problems)
+        // 依等級輸出一則提醒; 不經過 Log. text 為 null 時不輸出
+        private static void Alert(DevelopmentAlertLevel level, string text)
         {
-            if (problems == null || level == DevelopmentAlertLevel.Off) return;
-            string text = "[Log] LogSettings problems (Development Alert; Project Settings > TorbenTools > Log):" + problems;
+            if (text == null || level == DevelopmentAlertLevel.Off) return;
             if (level == DevelopmentAlertLevel.Error) Debug.LogError(text);
             else Debug.LogWarning(text);
         }

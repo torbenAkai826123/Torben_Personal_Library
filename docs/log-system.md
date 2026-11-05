@@ -114,6 +114,23 @@ Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟
 | 等級陣列重複 | `log.stackTrace` 或 `window.levelColors` 中同一等級出現多次 (只有最上面那筆生效) |
 
 - 不經過 `Log`, 直接呼叫 `UnityEngine.Debug`。多個問題合併成**一則**訊息 (標題一行, 每個問題一行), 每次 Install 最多一則。
+
+#### 正式版仍開著的開發設定
+
+上表 (設定本身有問題) 之外, **正式版** (非 Development Build, `!UnityEngine.Debug.isDebugBuild`) 另外檢查生效中設定裡屬於開發用途的項目。Editor 與 Development Build 中 `isDebugBuild` 為 true, 不檢查也不輸出。**只提醒, 不改任何設定、不擋任何訊息。**
+
+| 項目 | 觸發條件 |
+|---|---|
+| 啟動時開啟視窗 | `output.openWindowOnStart` 為 true |
+| Log 輸出 | `log.isPrintLog` 為 true |
+| Debug 等級 | `log.isDebugLog` 為 true |
+| 保留 Debug Log | `TORBEN_LOG_DEBUG` 有定義 |
+
+- 與上表共用 Development Alert 等級, 併入同一則訊息, 分兩段, 只輸出有內容的段落。正式版段落以 `Development settings enabled in a non-development build:` 開頭, 結尾為 `If this is intentional, set Development Alert to Off in <生效中設定檔名稱>.`。
+- **刻意在正式版開著時**, 把生效中設定檔 (有覆蓋檔時為覆蓋檔) 的 Development Alert 設為 `Off` 表示「已知」。`Off` 同時關閉上表的設定問題提醒。
+- 找不到設定檔時, 前三項依欄位初始值判斷 (皆為 false, 不會觸發), `TORBEN_LOG_DEBUG` 照常判斷; 有項目時併入「LogSettings not found」那一則 (一律 `Warning`), 處理方式改為「建立設定檔並設為 Off」。
+- `TORBEN_LOG_DEBUG` 以 Runtime 組件中的 `#if TORBEN_LOG_DEBUG` 判斷, 反映的是 **Runtime 組件編譯時** 的狀態: 目前函式庫以原始碼由遊戲專案編譯, 結果正確; 日後打包成 DLL 時只反映打包當下。
+- 檢查邏輯為 `DebugLogs.CollectReleaseProblems(settings, isDebugBuild, isDebugSymbolDefined, problems)` (internal), `Install` 以 `Debug.isDebugBuild` 與 `#if` 的結果呼叫它; 測試以 `DebugLogs.Install(settings, isDebugBuild, isDebugSymbolDefined)` 模擬正式版。
 - 欄位為 `LogSettings` 的 `[SerializeField, HideInInspector] developmentAlert`, 以 `LogSettings.DevelopmentAlert` 讀取。**只在 Project Settings 頁面編輯**, Inspector 不顯示; 編輯對象為生效中的檔案 (有覆蓋檔時為覆蓋檔), 與 Save Current State 相同。它不是執行中的狀態, Save Current State 不寫入。
 - Editor 中進入 Play 時, 狀態檢查的摘要 (見下方) 與 Development Alert 可能各提醒一次容量問題。
 
@@ -123,7 +140,7 @@ Unity 引擎訊息 ─ Application.logMessageReceivedThreaded (isUnityLog 開啟
 
 | 位置 | 功能 |
 |---|---|
-| Project Settings > TorbenTools > Log | 上方顯示狀態檢查的警告與修正按鈕; 預設檔不存在時只顯示「Create Default Settings File」。存在時依區塊顯示: **Files** (預設檔、`projectOverride` 連結、生效的檔案; 右側 Create Project Override、Save Current State、Edit in Inspector 按鈕)、**Runtime Check** (`Development Alert` 等級, 唯一在此頁編輯的欄位; 以 `SerializedObject` 寫入生效中的檔案, 支援 Undo)、**Build** (Keep Debug Log in Builds 開關與 Standalone / Android / iOS、Build Profile 的狀態)、**Log / Output / Window** (生效檔案內容的唯讀表格)。Development Alert 以外的設定內容不在此頁編輯, 按 Edit in Inspector 到設定檔的 Inspector 修改; 頁面每秒重新檢查一次 |
+| Project Settings > TorbenTools > Log | 上方顯示狀態檢查的警告與修正按鈕; 預設檔不存在時只顯示「Create Default Settings File」。存在時依區塊顯示: **Files** (預設檔、`projectOverride` 連結、生效的檔案; 右側 Create Project Override、Save Current State、Edit in Inspector 按鈕)、**Runtime Check** (`Development Alert` 等級, 唯一在此頁編輯的欄位; 以 `SerializedObject` 寫入生效中的檔案, 支援 Undo; 下方說明 Off 同時關閉設定問題與正式版開發設定的提醒)、**Build** (Keep Debug Log in Builds 開關與 Standalone / Android / iOS、Build Profile 的狀態)、**Log / Output / Window** (生效檔案內容的唯讀表格)。Development Alert 以外的設定內容不在此頁編輯, 按 Edit in Inspector 到設定檔的 Inspector 修改; 頁面每秒重新檢查一次 |
 | 設定檔的 Inspector | `LogSettingsInspector`: Log / Output / Window 為 Unity 預設的折疊欄位, 區塊內 bool 在上、其他欄位在下 (依欄位宣告順序)。`projectOverride` 只在預設檔顯示。等級顏色以 `LogLevelColorDrawer` 顯示: 等級 + 自訂開關 + Color picker (關閉時為預設文字顏色, 存空字串; 開啟時存 `#RRGGBB`, 透明時 `#RRGGBBAA`)。右上角 Save Current State 只在 Play 中、且此檔為生效的檔案時可用。以 `SerializedObject` 編輯, Cmd / Ctrl+Z 可復原 |
 | `TorbenTools/Log GUI Window` | 切換 `DebugLogs.isGUILog`; 只在 Play 中可用, 開啟時打勾 |
 | `TorbenTools/Log/Settings...` | 開啟上述設定頁 |
@@ -365,7 +382,7 @@ Log.Warning("Timeout", NetworkCategory.Instance);   // Console / 視窗顯示 "[
 | `dotnet/Library.Tests/LogSinkIsolationTests.cs` | dotnet | sink 例外隔離: 第一個 sink 失敗時第二個仍收到且呼叫端無例外、同一 sink 只回報一次且不被移除、`RemoveSink` / `ClearSinks` 後再回報、不同 sink 各回報一次、處理器為 null、處理器內呼叫 `Log` 不遞迴、處理器拋例外、無例外時寫入不配置 |
 | `dotnet/Library.Tests/LogTextCopyTests.cs` | dotnet | `FormatForCopy`: 有 / 無分類、空 Tag、Collapse 次數、rich text、有 / 無時間與位置、Unity 訊息從堆疊取位置、堆疊、保留 `<OnGUIFunc>` / `List<int>`、只用 `\n`; `StripRichText`: 已知標籤、其他角括號保留、無標籤時回傳原字串、巢狀與未閉合不拋例外 |
 | `dotnet/Library.Tests/LogOptionsTests.cs` | dotnet | `LogOptions` 欄位初始值、`Apply` / `Capture` 往返、堆疊追蹤開關對應、未定義 / 缺少 / 重複等級與 null 時不拋例外 |
-| `Scripts/Tests/PlayMode/LogSettingsInstallTests.cs` | PlayMode | 啟動時從 Resources 讀到預設檔; 沒有設定檔時與修改前相同且只警告一次; 套用預設檔; 覆蓋檔整份取代; `openWindowOnStart`; `DebugWindowOptions.Capture`; 容量 5 與 7 時兩份紀錄、合併順序、來源 / 搜尋篩選與 Collapse 正確; 隱藏按鈕後繪製不出錯; Development Alert (沒有問題 / Off 無輸出、Warning / Error 各一則、剛好在上限不提醒、多個問題合併一則、找不到設定檔為 Warning、`UnityHistory` 收得到、`isUnityLog` 關閉時不收集); sink 例外以 `LogException` 回報一次且帶型別名稱 |
+| `Scripts/Tests/PlayMode/LogSettingsInstallTests.cs` | PlayMode | 啟動時從 Resources 讀到預設檔; 沒有設定檔時與修改前相同且只警告一次; 套用預設檔; 覆蓋檔整份取代; `openWindowOnStart`; `DebugWindowOptions.Capture`; 容量 5 與 7 時兩份紀錄、合併順序、來源 / 搜尋篩選與 Collapse 正確; 隱藏按鈕後繪製不出錯; Development Alert (沒有問題 / Off 無輸出、Warning / Error 各一則、剛好在上限不提醒、多個問題合併一則、找不到設定檔為 Warning、`UnityHistory` 收得到、`isUnityLog` 關閉時不收集); 正式版開發設定 (開發版不檢查、四項各自與同時觸發、全關閉無項目、找不到設定檔依欄位初始值、與設定問題合併一則 / 只有正式版段落、Off 無輸出、訊息含預設檔與覆蓋檔名稱、併入 not found 警告); sink 例外以 `LogException` 回報一次且帶型別名稱 |
 | `Scripts/Tests/EditMode/ScriptingDefineUtilityTests.cs` | EditMode | define 字串的判斷 / 新增 / 移除 (null、空字串、前後空白、重複、大小寫) |
 | `Scripts/Tests/EditMode/LogLevelColorDrawerTests.cs` | EditMode | Color picker 與色碼互轉 (不透明 / 透明、空字串、無法解析、預設顏色往返) |
 | `Scripts/Tests/EditMode/LogSettingsCheckerTests.cs` | EditMode | 狀態檢查 1～4 (暫存 asset, TearDown 刪除)、Link 修正、預設檔路徑與 Resources 讀到同一個檔案、函式庫資料夾判斷; Development Alert 頁面編輯生效中的檔案 (有 / 無覆蓋檔)、Undo、欄位帶 `HideInInspector`; 覆蓋檔 Missing 判斷 (刪除暫存 asset); 容量上限常數與 Runtime 共用 |
